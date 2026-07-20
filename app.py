@@ -16,11 +16,10 @@ WORKSHEET_NAME = "OUTSTANDING"
 # @st.cache_data prevents the app from downloading the sheet every time you click a button
 @st.cache_data(ttl=600) 
 def load_data():
-    # Read the secure credentials from Streamlit's cloud vault
-    creds_json = st.secrets["GOOGLE_CREDENTIALS_JSON"]
-    creds_dict = json.loads(creds_json)
+    # Streamlit automatically parses the TOML block into a Python dictionary
+    creds_dict = dict(st.secrets["gcp_service_account"])
     
-    # Connect to Google Sheets
+    # Connect to Google Sheets using the dictionary directly
     gc = gspread.service_account_from_dict(creds_dict)
     sheet = gc.open(SPREADSHEET_NAME).worksheet(WORKSHEET_NAME)
     
