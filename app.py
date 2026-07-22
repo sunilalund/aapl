@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import gspread
-import requests
+import smtplib
+from email.mime.text import MIMEText
 import random
 
 # -------------------------------------------------------------
@@ -13,14 +14,15 @@ SPREADSHEET_NAME = "AAPL-Jockey-Reporter"
 WORKSHEET_NAME = "OUTSTANDING"
 USERS_WORKSHEET = "USERS"
 
-# Replace with your deployed Google Apps Script Web App URL
-WEB_APP_URL = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID_HERE/exec"
+# Gmail SMTP Credentials (pulls from Streamlit Secrets or uses constants below)
+SENDER_EMAIL = st.secrets.get("SENDER_EMAIL", "your-email@gmail.com")
+SENDER_APP_PASSWORD = st.secrets.get("SENDER_APP_PASSWORD", "xxxx xxxx xxxx xxxx")
 
 # -------------------------------------------------------------
-# AUTHENTICATION & GOOGLE SHEETS HELPERS
+# GOOGLE SHEETS & AUTH HELPERS
 # -------------------------------------------------------------
 def get_gspread_client():
-    """Connect to Google Sheets using Streamlit Secrets dictionary directly."""
+    """Connects to Google Sheets using st.secrets TOML block."""
     creds_dict = dict(st.secrets["gcp_service_account"])
     return gspread.service_account_from_dict(creds_dict)
 
@@ -45,17 +47,28 @@ def is_email_authorized(user_email):
         return False
 
 def send_otp_email(recipient_email, otp_code):
-    """Send 6-digit OTP via Google Apps Script Webhook."""
+    """Sends 6-digit OTP using Gmail SMTP & 16-digit App Password."""
+    subject = "Your Login OTP - Debtors Portal"
+    body = f"Your one-time authentication code is: {otp_code}\n\nThis code is valid for 5 minutes."
+    
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = recipient_email
+    
     try:
-        payload = {"to": recipient_email, "otp": otp_code}
-        response = requests.post(WEB_APP_URL, json=payload, timeout=10)
-        return "SUCCESS" in response.text
+        # Connect via SSL port 465
+        clean_password = SENDER_APP_PASSWORD.replace(" ", "")
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(SENDER_EMAIL, clean_password)
+            server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
+        return True
     except Exception as e:
-        st.error(f"Failed to send email: {e}")
+        st.error(f"Failed to send email via SMTP: {e}")
         return False
 
 # -------------------------------------------------------------
-# FETCH & CACHE DATA
+# FETCH & CACHE DATA (Original Production Logic)
 # -------------------------------------------------------------
 @st.cache_data(ttl=600) 
 def load_data():
@@ -133,10 +146,10 @@ if not st.session_state.authenticated:
                 st.rerun()
 
 # -------------------------------------------------------------
-# MAIN PORTAL UI (AUTHENTICATED)
+# MAIN PORTAL UI (Original Production Interface)
 # -------------------------------------------------------------
 else:
-    # Header & Logout bar
+    # Header & Logout
     top_col1, top_col2 = st.columns([5, 1])
     with top_col1:
         st.caption(f"Logged in as: **{st.session_state.target_email}**")
