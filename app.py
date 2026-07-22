@@ -1,38 +1,36 @@
 import streamlit as st
-import gspread
 import pandas as pd
-import smtplib
-from email.mime.text import MIMEText
+import gspread
+import requests
 import random
-import time
 
 # -------------------------------------------------------------
 # CONFIGURATION
 # -------------------------------------------------------------
+st.set_page_config(page_title="Debtors Portal", layout="wide")
+
 SPREADSHEET_NAME = "AAPL-Jockey-Reporter"
-CREDENTIALS_FILE = "credentials.json"
+WORKSHEET_NAME = "OUTSTANDING"
+USERS_WORKSHEET = "USERS"
 
-# SMTP Settings for sending OTP
-SENDER_EMAIL = "aapljockey@gmail.com"          # Your Gmail address
-SENDER_APP_PASSWORD = "vkcx puyj meux cpvy"    # 16-character App Password
-
-# Page setup
-st.set_page_config(page_title="Outstanding Reports", page_icon="📊", layout="wide")
+# Replace with your deployed Google Apps Script Web App URL
+WEB_APP_URL = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID_HERE/exec"
 
 # -------------------------------------------------------------
-# HELPER FUNCTIONS
+# AUTHENTICATION & GOOGLE SHEETS HELPERS
 # -------------------------------------------------------------
-def get_google_sheet_client():
-    return gspread.service_account(filename=CREDENTIALS_FILE)
+def get_gspread_client():
+    """Connect to Google Sheets using Streamlit Secrets dictionary directly."""
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    return gspread.service_account_from_dict(creds_dict)
 
 def is_email_authorized(user_email):
-    """Check if email exists in USERS tab with Active status"""
+    """Check if user email exists in USERS tab with Active status."""
     try:
-        gc = get_google_sheet_client()
-        sheet = gc.open(SPREADSHEET_NAME).worksheet("USERS")
+        gc = get_gspread_client()
+        sheet = gc.open(SPREADSHEET_NAME).worksheet(USERS_WORKSHEET)
         users_df = pd.DataFrame(sheet.get_all_records())
         
-        # Clean column names and emails
         users_df.columns = users_df.columns.str.strip().str.capitalize()
         if "Email" not in users_df.columns or "Status" not in users_df.columns:
             return False
@@ -47,30 +45,36 @@ def is_email_authorized(user_email):
         return False
 
 def send_otp_email(recipient_email, otp_code):
-    """Send 6-digit OTP via Gmail SMTP"""
-    subject = "Your Login OTP - Outstanding Reports"
-    body = f"Your one-time authentication code is: {otp_code}\n\nThis code is valid for 5 minutes."
-    
-    msg = MIMEText(body)
-    msg['Subject'] = subject
-    msg['From'] = SENDER_EMAIL
-    msg['To'] = recipient_email
-    
+    """Send 6-digit OTP via Google Apps Script Webhook."""
     try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(SENDER_EMAIL, SENDER_APP_PASSWORD)
-            server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
-        return True
+        payload = {"to": recipient_email, "otp": otp_code}
+        response = requests.post(WEB_APP_URL, json=payload, timeout=10)
+        return "SUCCESS" in response.text
     except Exception as e:
         st.error(f"Failed to send email: {e}")
         return False
 
-def load_outstanding_data():
-    """Fetch report data from Google Sheets"""
-    gc = get_google_sheet_client()
-    sheet = gc.open(SPREADSHEET_NAME).worksheet("OUTSTANDING")
+# -------------------------------------------------------------
+# FETCH & CACHE DATA
+# -------------------------------------------------------------
+@st.cache_data(ttl=600) 
+def load_data():
+    gc = get_gspread_client()
+    sheet = gc.open(SPREADSHEET_NAME).worksheet(WORKSHEET_NAME)
+    
+    # Get all data as a list of dictionaries
     data = sheet.get_all_records()
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    
+    # Clean up dates and numbers for sorting and math
+    if "Invoice Date" in df.columns:
+        df["Invoice Date"] = pd.to_datetime(df["Invoice Date"], dayfirst=True, errors="coerce")
+        
+    if "Pending Amount" in df.columns:
+        df["Pending Amount"] = df["Pending Amount"].astype(str).str.replace(',', '')
+        df["Pending Amount"] = pd.to_numeric(df["Pending Amount"], errors="coerce").fillna(0)
+        
+    return df
 
 # -------------------------------------------------------------
 # SESSION STATE MANAGEMENT
@@ -85,11 +89,10 @@ if "target_email" not in st.session_state:
     st.session_state.target_email = ""
 
 # -------------------------------------------------------------
-# INTERFACE LOGIC
+# AUTHENTICATION UI GATE
 # -------------------------------------------------------------
-st.title("📊 Outstanding Bills Dashboard")
-
 if not st.session_state.authenticated:
+    st.title("🔐 Debtors Portal Access")
     st.subheader("Login Authentication")
     
     if not st.session_state.otp_sent:
@@ -109,9 +112,9 @@ if not st.session_state.authenticated:
                     else:
                         st.error("Access Denied: Email address not found in authorized users list.")
             else:
-                st.warning("Please enter a valid email.")
+                st.warning("Please enter a valid email address.")
     else:
-        st.info(f"An OTP has been sent to **{st.session_state.target_email}**")
+        st.info(f"An OTP code has been sent to **{st.session_state.target_email}**")
         entered_otp = st.text_input("Enter 6-digit OTP:", max_chars=6)
         
         col1, col2 = st.columns([1, 4])
@@ -129,45 +132,57 @@ if not st.session_state.authenticated:
                 st.session_state.generated_otp = None
                 st.rerun()
 
+# -------------------------------------------------------------
+# MAIN PORTAL UI (AUTHENTICATED)
+# -------------------------------------------------------------
 else:
-    # -------------------------------------------------------------
-    # VIEWER DASHBOARD (AUTHENTICATED)
-    # -------------------------------------------------------------
-    col_user, col_logout = st.columns([4, 1])
-    with col_user:
+    # Header & Logout bar
+    top_col1, top_col2 = st.columns([5, 1])
+    with top_col1:
         st.caption(f"Logged in as: **{st.session_state.target_email}**")
-    with col_logout:
+    with top_col2:
         if st.button("Logout"):
             st.session_state.authenticated = False
             st.session_state.otp_sent = False
+            st.session_state.generated_otp = None
             st.rerun()
-            
-    st.markdown("---")
-    
-    with st.spinner("Loading latest outstanding data..."):
-        df = load_outstanding_data()
+
+    st.title("AAPL Jockey Outstanding Debtors")
+
+    try:
+        df = load_data()
         
-    if not df.empty:
-        # Metrics summary
-        total_pending = df["Pending Amount"].sum() if "Pending Amount" in df.columns else 0
-        total_parties = len(df["Party Name"].unique()) if "Party Name" in df.columns else len(df)
+        # 1. Searchable Dropdown for Party Name
+        unique_parties = sorted([p for p in df["Party Name"].unique() if str(p).strip() != ""])
+        party_list = ["All Parties"] + unique_parties
         
-        m1, m2 = st.columns(2)
-        m1.metric("Total Outstanding Amount", f"₹ {total_pending:,.2f}")
-        m2.metric("Total Pending Parties", total_parties)
+        selected_party = st.selectbox("Search and Select Party Name:", party_list)
         
-        st.markdown("### Outstanding Ledger")
-        
-        # Search filter
-        search_query = st.text_input("🔍 Search by Party Name or Reference:")
-        if search_query:
-            filtered_df = df[
-                df["Party Name"].astype(str).str.contains(search_query, case=False, na=False) |
-                df["Reference"].astype(str).str.contains(search_query, case=False, na=False)
-            ]
+        # 2. Filter Data based on selection
+        if selected_party != "All Parties":
+            filtered_df = df[df["Party Name"] == selected_party]
         else:
             filtered_df = df
             
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
-    else:
-        st.warning("No records found in the Outstanding report.")
+        # 3. Sort Chronologically (Oldest bills first)
+        if "Invoice Date" in filtered_df.columns:
+            filtered_df = filtered_df.sort_values(by="Invoice Date", ascending=True)
+            filtered_df["Invoice Date"] = filtered_df["Invoice Date"].dt.strftime('%d-%m-%Y')
+            
+        # 4. Display Quick Summary Metrics
+        total_pending = filtered_df["Pending Amount"].sum()
+        bill_count = len(filtered_df)
+        
+        col1, col2 = st.columns(2)
+        col1.metric("Total Outstanding", f"₹ {total_pending:,.2f}")
+        col2.metric("Total Pending Bills", bill_count)
+        
+        # 5. Display the Interactive Table
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True, 
+            hide_index=True
+        )
+        
+    except Exception as e:
+        st.error(f"Error loading data from Google Sheets: {e}")
