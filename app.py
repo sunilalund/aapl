@@ -4,11 +4,17 @@ import gspread
 import smtplib
 from email.mime.text import MIMEText
 import random
+import datetime
+import hmac
+import hashlib
+import time
 
 # -------------------------------------------------------------
 # CONFIGURATION
 # -------------------------------------------------------------
 st.set_page_config(page_title="Debtors Portal", layout="wide")
+#COOKIE_EXPIRY_DAYS = 7
+#cookie_manager = stx.CookieManager(key="debtors_portal_cookie_mgr")
 
 SPREADSHEET_NAME = "AAPL-Jockey-Reporter"
 WORKSHEET_NAME = "OUTSTANDING"
@@ -21,6 +27,13 @@ SENDER_APP_PASSWORD = st.secrets.get("SENDER_APP_PASSWORD", "xxxx xxxx xxxx xxxx
 # -------------------------------------------------------------
 # GOOGLE SHEETS & AUTH HELPERS
 # -------------------------------------------------------------
+
+def generate_auth_token(email,expiry_timestamp):
+    """Generates a secure 16-character token from the user email."""
+    secret = st.secrets.get("SENDER_APP_PASSWORD", "secret_salt_key")
+    payload = f"{email.lower().strip()}:{expiry_timestamp}"
+    return hmac.new(secret.encode(), email.lower().strip().encode(), hashlib.sha256).hexdigest()[:16]
+    
 def get_gspread_client():
     """Connects to Google Sheets using st.secrets TOML block."""
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -101,11 +114,39 @@ if "generated_otp" not in st.session_state:
 if "target_email" not in st.session_state:
     st.session_state.target_email = ""
 
+# --- AUTO-LOGIN VIA URL QUERY PARAMS ---
+if not st.session_state.authenticated:
+    url_email = st.query_params.get("user")
+    url_token = st.query_params.get("token")
+    url_exp = st.query_params.get("exp")
+
+    if url_email and url_token and url_exp:
+        try:
+            exp_ts = int(url_exp)
+            current_ts = int(time.time())
+
+            # 1. Check if token is still within 24-hour window
+            if current_ts < exp_ts:
+                # 2. Validate token signature & user sheet status
+                expected_token = generate_auth_token(url_email, exp_ts)
+                if url_token == expected_token and is_email_authorized(
+                    url_email
+                ):
+                    st.session_state.authenticated = True
+                    st.session_state.target_email = url_email
+                else:
+                    st.query_params.clear()
+            else:
+                # Expired (older than 24 hours) -> wipe URL params
+                st.query_params.clear()
+        except ValueError:
+            st.query_params.clear()
+            
 # -------------------------------------------------------------
 # AUTHENTICATION UI GATE
 # -------------------------------------------------------------
 if not st.session_state.authenticated:
-    st.title("🔐 Debtors Portal Access")
+    st.title("🔐 AAPL Sales Portal Access")
     st.subheader("Login Authentication")
     
     if not st.session_state.otp_sent:
@@ -135,6 +176,17 @@ if not st.session_state.authenticated:
             if st.button("Verify OTP"):
                 if entered_otp == st.session_state.generated_otp:
                     st.session_state.authenticated = True
+                    # Set expiry timestamp to 24 hours (86400 seconds) from now
+                    #exp_ts = int(time.time()) + 86400
+                    exp_ts = int(time.time()) + 43200
+                    token = generate_auth_token(
+                        st.session_state.target_email, exp_ts
+                    )
+                    # --- SAVE SESSION TO URL PARAMS ---
+                    st.query_params["user"] = st.session_state.target_email
+                    st.query_params["token"] = token
+                    st.query_params["exp"] = str(exp_ts)
+                    
                     st.success("Authenticated successfully!")
                     st.rerun()
                 else:
@@ -155,6 +207,9 @@ else:
         st.caption(f"Logged in as: **{st.session_state.target_email}**")
     with top_col2:
         if st.button("Logout"):
+            # --- CLEAR URL PARAMS ---
+            st.query_params.clear()
+
             st.session_state.authenticated = False
             st.session_state.otp_sent = False
             st.session_state.generated_otp = None
