@@ -17,7 +17,7 @@ from google.oauth2.service_account import Credentials
 # -------------------------------------------------------------
 st.set_page_config(
     page_title="AAPL Sales & Operations Portal",
-    page_icon="📊",
+    page_icon="ðŸ“Š",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -134,10 +134,10 @@ def format_inr(val):
             s = s[:-2]
         groups.reverse()
         formatted_int = ",".join(groups + [r]) if groups else r
-        res = f"₹{formatted_int}.{d[0]}"
+        res = f"â‚¹{formatted_int}.{d[0]}"
         return f"-{res}" if is_neg else res
     except Exception:
-        return f"₹{val}"
+        return f"â‚¹{val}"
 
 
 # -------------------------------------------------------------
@@ -234,7 +234,7 @@ if not st.session_state.authenticated:
 # 5. AUTHENTICATION UI GATE (LOGIN PAGE)
 # -------------------------------------------------------------
 if not st.session_state.authenticated:
-    st.title("🔐 AAPL Sales & Operations Portal")
+    st.title("ðŸ” AAPL Sales & Operations Portal")
     st.subheader("Login Authentication")
 
     if not st.session_state.otp_sent:
@@ -333,15 +333,92 @@ else:
     menu = st.sidebar.radio("Navigation Menu", options=menu_options)
 
     st.sidebar.divider()
-    if st.sidebar.button("🔄 Refresh Data"):
+    if st.sidebar.button("ðŸ”„ Refresh Data"):
         st.cache_data.clear()
         st.rerun()
+
+    # =========================================================
+    # MENU VIEW 2: SALES & OPERATIONS UNITS DASHBOARD
+    # =========================================================
+    elif menu == "Achievement & Targets (Units)":
+        st.title("ðŸŽ¯ Sales Performance & Target Tracker")
+        st.caption("Unit-level achievement metrics per division.")
+
+        available_jcs = (
+            df_jc["JC_Month"].unique().tolist()
+            if not df_jc.empty and "JC_Month" in df_jc.columns
+            else ["M1"]
+        )
+        selected_jc = st.selectbox("Select Active JC Month", options=available_jcs)
+
+        df_jc_filtered = df_jc[df_jc["JC_Month"] == selected_jc].copy()
+
+        tot_target_pcs = (
+            pd.to_numeric(df_jc_filtered["Target_Pcs"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        tot_achv_pcs = (
+            pd.to_numeric(df_jc_filtered["Achv_Pcs"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        tot_bal_pcs = (
+            pd.to_numeric(df_jc_filtered["Balance_Pcs"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        overall_pct = (
+            (tot_achv_pcs / tot_target_pcs) * 100 if tot_target_pcs > 0 else 0.0
+        )
+        tot_achv_val = (
+            pd.to_numeric(df_jc_filtered["Achv_Value"], errors="coerce")
+            .fillna(0)
+            .sum()
+	)
+
+	c1, c2, c3, c4, c5 = st.columns(5)
+
+	if is_admin_or_mgr:
+
+	    c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+            c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
+            c3.metric("Achievement %", f"{overall_pct:.1f}%")
+            c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
+	    c5.metric("Achieved (Value)", format_inr(tot_achv_val))
+	else:
+	    c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+            c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
+            c3.metric("Achievement %", f"{overall_pct:.1f}%")
+            c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
+
+        st.divider()
+
+        st.subheader(f"Division Target vs Achievement in Units ({selected_jc})")
+        fig_units = px.bar(
+            df_jc_filtered,
+            x="Division",
+            y=["Target_Pcs", "Achv_Pcs", "Balance_Pcs", "Achv_Value"],
+            barmode="group",
+            labels={"value": "Quantity (Pcs)", "variable": "Status"},
+            color_discrete_sequence=["#0d6efd", "#198754", "#dc3545"],
+        )
+        st.plotly_chart(fig_units, use_container_width=True)
+
+        st.subheader("Division Performance Breakdown")
+        st.dataframe(
+            df_jc_filtered[
+                ["Division", "Target_Pcs", "Achv_Pcs", "Achv_Pct", "Balance_Pcs", "Achv_Value"]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
 
     # =========================================================
     # MENU VIEW 1: ADMIN/MANAGER EXECUTIVE DASHBOARD
     # =========================================================
     if menu == "Executive Dashboard":
-        st.title("📌 Executive Overview Dashboard")
+        st.title("ðŸ“Œ Executive Overview Dashboard")
 
         available_jcs = (
             df_jc["JC_Month"].unique().tolist()
@@ -414,74 +491,18 @@ else:
                 )
                 st.plotly_chart(fig_inv, use_container_width=True)
 
-    # =========================================================
-    # MENU VIEW 2: SALES & OPERATIONS UNITS DASHBOARD
-    # =========================================================
-    elif menu == "Achievement & Targets (Units)":
-        st.title("🎯 Sales Performance & Target Tracker")
-        st.caption("Unit-level achievement metrics per division.")
 
-        available_jcs = (
-            df_jc["JC_Month"].unique().tolist()
-            if not df_jc.empty and "JC_Month" in df_jc.columns
-            else ["M1"]
-        )
-        selected_jc = st.selectbox("Select Active JC Month", options=available_jcs)
-
-        df_jc_filtered = df_jc[df_jc["JC_Month"] == selected_jc].copy()
-
-        tot_target_pcs = (
-            pd.to_numeric(df_jc_filtered["Target_Pcs"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        tot_achv_pcs = (
-            pd.to_numeric(df_jc_filtered["Achv_Pcs"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        tot_bal_pcs = (
-            pd.to_numeric(df_jc_filtered["Balance_Pcs"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        overall_pct = (
-            (tot_achv_pcs / tot_target_pcs) * 100 if tot_target_pcs > 0 else 0.0
-        )
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
-        c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
-        c3.metric("Achievement %", f"{overall_pct:.1f}%")
-        c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
-
-        st.divider()
-
-        st.subheader(f"Division Target vs Achievement in Units ({selected_jc})")
-        fig_units = px.bar(
-            df_jc_filtered,
-            x="Division",
-            y=["Target_Pcs", "Achv_Pcs", "Balance_Pcs"],
-            barmode="group",
-            labels={"value": "Quantity (Pcs)", "variable": "Status"},
-            color_discrete_sequence=["#0d6efd", "#198754", "#dc3545"],
-        )
-        st.plotly_chart(fig_units, use_container_width=True)
-
-        st.subheader("Division Performance Breakdown")
-        st.dataframe(
-            df_jc_filtered[
-                ["Division", "Target_Pcs", "Achv_Pcs", "Achv_Pct", "Balance_Pcs"]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
+    # Place this at the very bottom of the Dashboard menu block
+    if is_admin_or_mgr:
+         st.divider()
+         st.subheader("💼 Investment Breakdown")
+         st.dataframe(df_inv, use_container_width=True, hide_index=True)
 
     # =========================================================
     # MENU VIEW 3: OUTSTANDING DEBTORS (ACCESSIBLE TO ALL)
     # =========================================================
     elif menu == "Outstanding Debtors":
-        st.title("💸 Outstanding Debtors Portal")
+        st.title("ðŸ’¸ Outstanding Debtors Portal")
 
         if not df_out.empty and "Party Name" in df_out.columns:
             unique_parties = sorted(
@@ -525,7 +546,7 @@ else:
     # MENU VIEW 4: GRANULAR STOCK DETAILS (ACCESSIBLE TO ALL)
     # =========================================================
     elif menu == "Stock Details":
-        st.title("📦 Granular Inventory & Stock Details")
+        st.title("ðŸ“¦ Granular Inventory & Stock Details")
 
         if not df_stock.empty:
             # Multi-column Search/Filter
@@ -533,7 +554,7 @@ else:
 
             with col_search:
                 search_query = st.text_input(
-                    "🔍 Search Stock by Item Name / Code:"
+                    "ðŸ” Search Stock by Item Name / Code:"
                 )
 
             with col_div:
@@ -573,7 +594,7 @@ else:
     # MENU VIEW 5: INVESTMENT BREAKDOWN (ADMIN/MANAGER ONLY)
     # =========================================================
     elif menu == "Investment Breakdown":
-        st.title("💼 Capital & Investment Master Breakdown")
+        st.title("ðŸ’¼ Capital & Investment Master Breakdown")
 
         if not df_inv.empty:
             tot_out = (
