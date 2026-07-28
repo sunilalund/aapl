@@ -697,14 +697,6 @@ else:
             display_stock = filtered_stock.drop(
                 columns=cols_to_drop + ["_Division_Tag"], errors="ignore"
             )
-
-            # Drop any 'Unnamed' or blank headers automatically
-            unnamed_cols = [
-                c for c in display_stock.columns 
-                if c.lower().startswith("unnamed") or c.strip() == ""
-            ]
-            display_stock = display_stock.drop(columns=unnamed_cols, errors="ignore")
-
             st.caption(f"Displaying {len(display_stock)} stock items")
             st.dataframe(display_stock, use_container_width=True, hide_index=True)
         else:
