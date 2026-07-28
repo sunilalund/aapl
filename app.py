@@ -17,7 +17,7 @@ from google.oauth2.service_account import Credentials
 # -------------------------------------------------------------
 st.set_page_config(
     page_title="AAPL Sales & Operations Portal",
-    page_icon="📊",
+    page_icon="ðŸ“Š",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -134,10 +134,10 @@ def format_inr(val):
             s = s[:-2]
         groups.reverse()
         formatted_int = ",".join(groups + [r]) if groups else r
-        res = f"₹{formatted_int}.{d[0]}"
+        res = f"â‚¹{formatted_int}.{d[0]}"
         return f"-{res}" if is_neg else res
     except Exception:
-        return f"₹{val}"
+        return f"â‚¹{val}"
 
 
 def sort_jc_months(months_list):
@@ -259,7 +259,7 @@ if not st.session_state.authenticated:
 # 5. AUTHENTICATION UI GATE (LOGIN PAGE)
 # -------------------------------------------------------------
 if not st.session_state.authenticated:
-    st.title("🔐 AAPL Sales & Operations Portal")
+    st.title("ðŸ” AAPL Sales & Operations Portal")
     st.subheader("Login Authentication")
 
     if not st.session_state.otp_sent:
@@ -352,7 +352,7 @@ else:
     menu = st.sidebar.radio("Navigation Menu", options=menu_options)
 
     st.sidebar.divider()
-    if st.sidebar.button("🔄 Refresh Data"):
+    if st.sidebar.button("ðŸ”„ Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
@@ -360,7 +360,7 @@ else:
     # MENU VIEW 1 & 2: UNIFIED DASHBOARD (TABLE TOP, GRAPH DOWN)
     # =========================================================
     if menu in ["Executive Dashboard", "Achievement & Targets (Units)"]:
-        st.title("📊 Sales Performance & Dashboard")
+        st.title("ðŸ“Š Sales Performance & Dashboard")
 
         # 1. Chronological JC Month Selection (M1 to M13)
         all_jcs = (
@@ -418,7 +418,7 @@ else:
         # -------------------------------------------------------------
         # TABLES AT TOP: Current Month Table (Left) & Prior Months (Right)
         # -------------------------------------------------------------
-        st.subheader(f"📋 Sales Performance Tables ({selected_jc})")
+        st.subheader(f"ðŸ“‹ Sales Performance Tables ({selected_jc})")
 
         col_left_tbl, col_right_tbl = st.columns([6, 4])
 
@@ -501,7 +501,7 @@ else:
         # -------------------------------------------------------------
         # GRAPH DISPLAYED DOWN (Below Table)
         # -------------------------------------------------------------
-        st.subheader(f"📈 Performance Chart ({selected_jc})")
+        st.subheader(f"ðŸ“ˆ Performance Chart ({selected_jc})")
 
         fig_perf = px.bar(
             df_jc_curr,
@@ -518,7 +518,7 @@ else:
         # -------------------------------------------------------------
         if is_admin_or_mgr:
             st.divider()
-            st.subheader("💼 Capital & Investment Master Breakdown")
+            st.subheader("ðŸ’¼ Capital & Investment Master Breakdown")
 
             if not df_inv.empty:
                 inv_cols = [
@@ -559,7 +559,7 @@ else:
     # MENU VIEW 3: OUTSTANDING DEBTORS (ACCESSIBLE TO ALL)
     # =========================================================
     elif menu == "Outstanding Debtors":
-        st.title("💸 Outstanding Debtors Portal")
+        st.title("ðŸ’¸ Outstanding Debtors Portal")
 
         if not df_out.empty and "Party Name" in df_out.columns:
             unique_parties = sorted(
@@ -604,27 +604,44 @@ else:
     elif menu == "Stock Details":
         st.title("📦 Granular Inventory & Stock Details")
 
-        if not df_stock.empty:
+        if not df_stock.empty and len(df_stock.columns) >= 2:
+            df_stk = df_stock.copy()
+
+            # Ensure sheet column headers are strings and clean whitespace
+            df_stk.columns = [str(col).strip() for col in df_stk.columns]
+
+            # 1. Extract Division Identifier from Column 2 (Index 1) -> last 3 characters
+            col_2_name = df_stk.columns[1]
+            df_stk["_Division_Tag"] = (
+                df_stk[col_2_name].astype(str).str.strip().str[-3:]
+            )
+
+            # 2. Rename Column 10 (Index 9) to 'MRP'
+            if len(df_stk.columns) >= 10:
+                col_10_name = df_stk.columns[9]
+                df_stk = df_stk.rename(columns={col_10_name: "MRP"})
+
+            # Filter UI Layout
             col_search, col_div = st.columns([2, 1])
+
+            with col_div:
+                div_list = sorted(
+                    [d for d in df_stk["_Division_Tag"].unique() if str(d).strip() != ""]
+                )
+                div_options = ["All Divisions"] + div_list
+                selected_stock_div = st.selectbox("Filter Division:", div_options)
 
             with col_search:
                 search_query = st.text_input("🔍 Search Stock by Item Name / Code:")
 
-            with col_div:
-                div_options = (
-                    ["All Divisions"] + sorted(df_stock["Division"].unique().tolist())
-                    if "Division" in df_stock.columns
-                    else ["All Divisions"]
-                )
-                selected_stock_div = st.selectbox("Filter Division:", div_options)
-
-            filtered_stock = df_stock.copy()
-
+            # Apply Division Filter
+            filtered_stock = df_stk.copy()
             if selected_stock_div != "All Divisions":
                 filtered_stock = filtered_stock[
-                    filtered_stock["Division"] == selected_stock_div
+                    filtered_stock["_Division_Tag"] == selected_stock_div
                 ]
 
+            # Apply Text Search Filter
             if search_query:
                 mask = filtered_stock.astype(str).apply(
                     lambda row: row.str.contains(search_query, case=False).any(),
@@ -632,18 +649,29 @@ else:
                 )
                 filtered_stock = filtered_stock[mask]
 
-            st.caption(f"Displaying {len(filtered_stock)} stock items")
-            st.dataframe(filtered_stock, use_container_width=True, hide_index=True)
-        else:
-            st.warning(
-                "Granular stock sheet (`STOCK`) is empty or not created yet. Please add item rows to `STOCK` worksheet."
+            # 3. Exclude Columns 1, 2, 3, 11, 12, 13 (0-based indices 0, 1, 2, 10, 11, 12) from Display
+            exclude_indices = [0, 1, 2, 10, 11, 12]
+            cols_to_drop = [
+                df_stock.columns[i]
+                for i in exclude_indices
+                if i < len(df_stock.columns)
+            ]
+
+            display_stock = filtered_stock.drop(
+                columns=cols_to_drop + ["_Division_Tag"], errors="ignore"
             )
 
+            st.caption(f"Displaying {len(display_stock)} stock items")
+            st.dataframe(display_stock, use_container_width=True, hide_index=True)
+        else:
+            st.warning(
+                "Granular stock sheet (`STOCK`) is empty or does not contain enough columns."
+            )
     # =========================================================
     # MENU VIEW 5: INVESTMENT BREAKDOWN (ADMIN/MANAGER ONLY)
     # =========================================================
     elif menu == "Investment Breakdown":
-        st.title("💼 Capital & Investment Master Breakdown")
+        st.title("ðŸ’¼ Capital & Investment Master Breakdown")
 
         if not df_inv.empty:
             tot_out = (
