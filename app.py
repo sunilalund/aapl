@@ -1,355 +1,613 @@
+import datetime
 import hashlib
 import hmac
+import os
 import random
 import smtplib
 import time
 from email.mime.text import MIMEText
 import gspread
 import pandas as pd
+import plotly.express as px
 import streamlit as st
+from google.oauth2.service_account import Credentials
 
 # -------------------------------------------------------------
-# CONFIGURATION
+# 1. PAGE & BRANDING CONFIGURATION
 # -------------------------------------------------------------
-st.set_page_config(page_title="Business Portal", layout="wide")
+st.set_page_config(
+    page_title="AAPL Sales & Operations Portal",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 SPREADSHEET_NAME = "AAPL-Jockey-Reporter"
 WORKSHEET_OUTSTANDING = "OUTSTANDING"
-USERS_WORKSHEET = "USERS"
-JC_WORKSHEET = "JC_CONFIG"
+WORKSHEET_USERS = "USERS"
+WORKSHEET_JC = "JC_Master"
+WORKSHEET_INVESTMENT = "Investment_Master"
+WORKSHEET_STOCK = "STOCK"  # Sheet containing full granular stock item records
 
+# Gmail SMTP Credentials (from Secrets or fallbacks)
 SENDER_EMAIL = st.secrets.get("SENDER_EMAIL", "your-email@gmail.com")
-SENDER_APP_PASSWORD = st.secrets.get(
-    "SENDER_APP_PASSWORD", "xxxx xxxx xxxx xxxx"
-)
+SENDER_APP_PASSWORD = st.secrets.get("SENDER_APP_PASSWORD", "xxxx xxxx xxxx xxxx")
 
 
 # -------------------------------------------------------------
-# AUTH & ROLE HELPERS
+# 2. GOOGLE SHEETS & AUTH HELPERS
 # -------------------------------------------------------------
 def generate_auth_token(email, expiry_timestamp):
-  secret = st.secrets.get("SENDER_APP_PASSWORD", "secret_salt_key")
-  payload = f"{str(email).lower().strip()}:{expiry_timestamp}"
-  return hmac.new(
-      secret.encode(), payload.encode(), hashlib.sha256
-  ).hexdigest()[:16]
+    """Generates a secure 16-character token from the user email."""
+    secret = st.secrets.get("SENDER_APP_PASSWORD", "secret_salt_key")
+    payload = f"{email.lower().strip()}:{expiry_timestamp}"
+    return hmac.new(
+        secret.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()[:16]
 
 
 def get_gspread_client():
-  creds_dict = dict(st.secrets["gcp_service_account"])
-  return gspread.service_account_from_dict(creds_dict)
+    """Connects to Google Sheets using Streamlit Secrets TOML or local credentials file."""
+    if "gcp_service_account" in st.secrets:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        return gspread.service_account_from_dict(creds_dict)
+    elif os.path.exists("credentials.json"):
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = Credentials.from_service_account_file(
+            "credentials.json", scopes=scopes
+        )
+        return gspread.authorize(creds)
+    else:
+        st.error("No valid GCP credentials found in Secrets or credentials.json!")
+        st.stop()
 
 
-def get_user_info(user_email):
-  """Returns (is_authorized, role) for the user."""
-  if not user_email or not str(user_email).strip():
-    return False, "User"
-  try:
-    gc = get_gspread_client()
-    sheet = gc.open(SPREADSHEET_NAME).worksheet(USERS_WORKSHEET)
-    users_df = pd.DataFrame(sheet.get_all_records())
+def get_user_auth_info(user_email):
+    """Checks user email against USERS tab. Returns tuple: (is_active, role)."""
+    try:
+        gc = get_gspread_client()
+        sheet = gc.open(SPREADSHEET_NAME).worksheet(WORKSHEET_USERS)
+        users_df = pd.DataFrame(sheet.get_all_records())
 
-    users_df.columns = users_df.columns.str.strip().str.capitalize()
-    if "Email" not in users_df.columns or "Status" not in users_df.columns:
-      return False, "User"
+        users_df.columns = users_df.columns.str.strip().str.capitalize()
+        if "Email" not in users_df.columns or "Status" not in users_df.columns:
+            return False, "Guest"
 
-    users_df["Email"] = users_df["Email"].astype(str).str.strip().str.lower()
-    users_df["Status"] = users_df["Status"].astype(str).str.strip().str.capitalize()
-    if "Role" not in users_df.columns:
-      users_df["Role"] = "User"
+        users_df["Email"] = users_df["Email"].astype(str).str.strip().str.lower()
+        users_df["Status"] = users_df["Status"].astype(str).str.strip().str.capitalize()
 
-    match = users_df[
-        (users_df["Email"] == user_email.lower().strip())
-        & (users_df["Status"] == "Active")
-    ]
-    if not match.empty:
-      role = match.iloc[0]["Role"]
-      return True, role
-    return False, "User"
-  except Exception as e:
-    st.error(f"User verification error: {e}")
-    return False, "User"
+        if "Role" not in users_df.columns:
+            users_df["Role"] = "Sales"
+        else:
+            users_df["Role"] = users_df["Role"].astype(str).str.strip().str.title()
+
+        match = users_df[
+            (users_df["Email"] == user_email.lower().strip())
+            & (users_df["Status"] == "Active")
+        ]
+
+        if not match.empty:
+            role = match.iloc[0]["Role"]
+            return True, role
+        return False, "Guest"
+    except Exception as e:
+        st.error(f"User verification error: {e}")
+        return False, "Guest"
 
 
 def send_otp_email(recipient_email, otp_code):
-  subject = "Your Login OTP - Business Portal"
-  body = (
-      f"Your one-time authentication code is: {otp_code}\n\nValid for 5"
-      " minutes."
-  )
-  msg = MIMEText(body)
-  msg["Subject"] = subject
-  msg["From"] = SENDER_EMAIL
-  msg["To"] = recipient_email
+    """Sends 6-digit OTP using Gmail SMTP & App Password."""
+    subject = "Your Login OTP - AAPL Sales & Operations Portal"
+    body = f"Your one-time authentication code is: {otp_code}\n\nThis code is valid for 5 minutes."
 
-  try:
-    clean_password = SENDER_APP_PASSWORD.replace(" ", "")
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-      server.login(SENDER_EMAIL, clean_password)
-      server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
-    return True
-  except Exception as e:
-    st.error(f"SMTP Error: {e}")
-    return False
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = SENDER_EMAIL
+    msg["To"] = recipient_email
 
-
-# -------------------------------------------------------------
-# MOCK DATA SUPPLIERS (Replace with real extractions tomorrow)
-# -------------------------------------------------------------
-def get_mock_sales_data():
-  """Simulates Shoper sales report per division."""
-  return {
-      "SPM": {"achieved": 420000, "value": 480000, "stock_val": 1250000},
-      "SPW": {"achieved": 380000, "value": 410000, "stock_val": 980000},
-      "THM": {"achieved": 310000, "value": 350000, "stock_val": 750000},
-      "KTH": {"achieved": 290000, "value": 310000, "stock_val": 620000},
-  }
+    try:
+        clean_password = SENDER_APP_PASSWORD.replace(" ", "")
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SENDER_EMAIL, clean_password)
+            server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Failed to send email via SMTP: {e}")
+        return False
 
 
-def get_mock_tally_outstanding():
-  """Simulates Tally ERP 9 outstanding totals by bill prefix."""
-  return {
-      "SPM": 850000,  # SCRS
-      "SPW": 620000,  # SWCRS
-      "THM": 490000,  # THCRS
-      "KTH": 410000,  # KTHCRS
-  }
+def format_inr(val):
+    """Formats numeric values into Indian Rupee format."""
+    try:
+        val = float(val)
+        is_neg = val < 0
+        val = abs(val)
+        s, *d = f"{val:.2f}".split(".")
+        r = s[-3:]
+        s = s[:-3]
+        groups = []
+        while s:
+            groups.append(s[-2:])
+            s = s[:-2]
+        groups.reverse()
+        formatted_int = ",".join(groups + [r]) if groups else r
+        res = f"₹{formatted_int}.{d[0]}"
+        return f"-{res}" if is_neg else res
+    except Exception:
+        return f"₹{val}"
 
 
 # -------------------------------------------------------------
-# SESSION STATE & AUTO-LOGIN
+# 3. CACHED DATA LOADING ENGINE
+# -------------------------------------------------------------
+@st.cache_data(ttl=300)
+def load_all_portal_data():
+    """Loads all worksheets from Google Sheets into DataFrames."""
+    gc = get_gspread_client()
+    sh = gc.open(SPREADSHEET_NAME)
+
+    # 1. Outstanding Data
+    try:
+        ws_out = sh.worksheet(WORKSHEET_OUTSTANDING).get_all_records()
+        df_out = pd.DataFrame(ws_out)
+        if "Invoice Date" in df_out.columns:
+            df_out["Invoice Date"] = pd.to_datetime(
+                df_out["Invoice Date"], dayfirst=True, errors="coerce"
+            )
+        if "Pending Amount" in df_out.columns:
+            df_out["Pending Amount"] = (
+                df_out["Pending Amount"].astype(str).str.replace(",", "")
+            )
+            df_out["Pending Amount"] = (
+                pd.to_numeric(df_out["Pending Amount"], errors="coerce").fillna(0)
+            )
+    except Exception:
+        df_out = pd.DataFrame()
+
+    # 2. JC Master Performance Data
+    try:
+        ws_jc = sh.worksheet(WORKSHEET_JC).get_all_records()
+        df_jc = pd.DataFrame(ws_jc)
+    except Exception:
+        df_jc = pd.DataFrame()
+
+    # 3. Investment Master Data
+    try:
+        ws_inv = sh.worksheet(WORKSHEET_INVESTMENT).get_all_records()
+        df_inv = pd.DataFrame(ws_inv)
+    except Exception:
+        df_inv = pd.DataFrame()
+
+    # 4. Full Granular Stock Data
+    try:
+        ws_stock = sh.worksheet(WORKSHEET_STOCK).get_all_records()
+        df_stock = pd.DataFrame(ws_stock)
+    except Exception:
+        df_stock = pd.DataFrame()
+
+    return df_out, df_jc, df_inv, df_stock
+
+
+# -------------------------------------------------------------
+# 4. SESSION STATE MANAGEMENT & AUTO-LOGIN GATE
 # -------------------------------------------------------------
 if "authenticated" not in st.session_state:
-  st.session_state.authenticated = False
-if "user_role" not in st.session_state:
-  st.session_state.user_role = "User"
+    st.session_state.authenticated = False
 if "otp_sent" not in st.session_state:
-  st.session_state.otp_sent = False
+    st.session_state.otp_sent = False
 if "generated_otp" not in st.session_state:
-  st.session_state.generated_otp = None
+    st.session_state.generated_otp = None
 if "target_email" not in st.session_state:
-  st.session_state.target_email = ""
+    st.session_state.target_email = ""
+if "user_role" not in st.session_state:
+    st.session_state.user_role = "Sales"
 
-# Check URL Auto-Login
+# Auto-login via Query Params
 if not st.session_state.authenticated:
-  url_email = st.query_params.get("user")
-  url_token = st.query_params.get("token")
-  url_exp = st.query_params.get("exp")
+    url_email = st.query_params.get("user")
+    url_token = st.query_params.get("token")
+    url_exp = st.query_params.get("exp")
 
-  if url_email and url_token and url_exp:
-    try:
-      exp_ts = int(url_exp)
-      if int(time.time()) < exp_ts:
-        if url_token == generate_auth_token(url_email, exp_ts):
-          is_auth, role = get_user_info(url_email)
-          if is_auth:
-            st.session_state.authenticated = True
-            st.session_state.target_email = url_email
-            st.session_state.user_role = role
-          else:
+    if url_email and url_token and url_exp:
+        try:
+            exp_ts = int(url_exp)
+            current_ts = int(time.time())
+
+            if current_ts < exp_ts:
+                expected_token = generate_auth_token(url_email, exp_ts)
+                is_active, role = get_user_auth_info(url_email)
+                if url_token == expected_token and is_active:
+                    st.session_state.authenticated = True
+                    st.session_state.target_email = url_email
+                    st.session_state.user_role = role
+                else:
+                    st.query_params.clear()
+            else:
+                st.query_params.clear()
+        except ValueError:
             st.query_params.clear()
-        else:
-          st.query_params.clear()
-      else:
-        st.query_params.clear()
-    except ValueError:
-      st.query_params.clear()
 
 # -------------------------------------------------------------
-# LOGIN GATE
+# 5. AUTHENTICATION UI GATE (LOGIN PAGE)
 # -------------------------------------------------------------
 if not st.session_state.authenticated:
-  st.title("🔐 Portal Authentication")
+    st.title("🔐 AAPL Sales & Operations Portal")
+    st.subheader("Login Authentication")
 
-  if not st.session_state.otp_sent:
-    email_input = st.text_input("Enter Authorized Email Address:")
-    if st.button("Send OTP"):
-      if email_input:
-        is_auth, role = get_user_info(email_input)
-        if is_auth:
-          otp = str(random.randint(100000, 999999))
-          if send_otp_email(email_input, otp):
-            st.session_state.generated_otp = otp
-            st.session_state.target_email = email_input
-            st.session_state.user_role = role
-            st.session_state.otp_sent = True
-            st.success("OTP sent!")
-            st.rerun()
-        else:
-          st.error("Email not authorized.")
-  else:
-    st.info(f"OTP sent to **{st.session_state.target_email}**")
-    entered_otp = st.text_input("Enter 6-digit OTP:", max_chars=6)
+    if not st.session_state.otp_sent:
+        email_input = st.text_input("Enter your authorized Email Address:")
 
-    col1, col2 = st.columns([1, 4])
-    with col1:
-      if st.button("Verify OTP"):
-        if entered_otp == st.session_state.generated_otp:
-          st.session_state.authenticated = True
-          exp_ts = int(time.time()) + 86400  # 24 hrs
-          st.query_params["user"] = st.session_state.target_email
-          st.query_params["token"] = generate_auth_token(
-              st.session_state.target_email, exp_ts
-          )
-          st.query_params["exp"] = str(exp_ts)
-          st.rerun()
-        else:
-          st.error("Invalid OTP.")
-    with col2:
-      if st.button("Cancel"):
-        st.session_state.otp_sent = False
-        st.rerun()
+        if st.button("Send OTP"):
+            if email_input:
+                with st.spinner("Verifying credentials..."):
+                    is_active, role = get_user_auth_info(email_input)
+                    if is_active:
+                        otp = str(random.randint(100000, 999999))
+                        if send_otp_email(email_input, otp):
+                            st.session_state.generated_otp = otp
+                            st.session_state.target_email = email_input
+                            st.session_state.user_role = role
+                            st.session_state.otp_sent = True
+                            st.success(f"OTP sent successfully to {email_input}!")
+                            st.rerun()
+                    else:
+                        st.error(
+                            "Access Denied: Email not authorized or inactive."
+                        )
+            else:
+                st.warning("Please enter a valid email address.")
+    else:
+        st.info(f"OTP sent to **{st.session_state.target_email}**")
+        entered_otp = st.text_input("Enter 6-digit OTP:", max_chars=6)
+
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("Verify OTP"):
+                if entered_otp == st.session_state.generated_otp:
+                    st.session_state.authenticated = True
+                    exp_ts = int(time.time()) + 43200  # 12 Hours persistent URL token
+                    token = generate_auth_token(
+                        st.session_state.target_email, exp_ts
+                    )
+
+                    st.query_params["user"] = st.session_state.target_email
+                    st.query_params["token"] = token
+                    st.query_params["exp"] = str(exp_ts)
+
+                    st.success("Authenticated successfully!")
+                    st.rerun()
+                else:
+                    st.error("Invalid OTP code. Please try again.")
+        with col2:
+            if st.button("Cancel / Change Email"):
+                st.session_state.otp_sent = False
+                st.session_state.generated_otp = None
+                st.rerun()
 
 # -------------------------------------------------------------
-# MAIN APP (AUTHENTICATED)
+# 6. MAIN PORTAL (POST-AUTHENTICATION)
 # -------------------------------------------------------------
 else:
-  # Navigation & Logout Header
-  top1, top2, top3 = st.columns([4, 2, 1])
-  with top1:
-    st.caption(
-        f"Logged in as: **{st.session_state.target_email}** | Role:"
-        f" **{st.session_state.user_role}**"
-    )
-  with top3:
-    if st.button("Logout"):
-      st.query_params.clear()
-      st.session_state.authenticated = False
-      st.rerun()
+    df_out, df_jc, df_inv, df_stock = load_all_portal_data()
+    role = st.session_state.user_role
+    is_admin_or_mgr = role in ["Admin", "Manager"]
 
-  # Menu Navigation
-  menu_choice = st.radio(
-      "Navigation",
-      ["Dashboard", "Outstanding", "Stock"],
-      horizontal=True,
-      label_visibility="collapsed",
-  )
-  st.divider()
+    # Top Navigation Bar & User Information
+    top_col1, top_col2 = st.columns([5, 1])
+    with top_col1:
+        st.caption(
+            f"Logged in as: **{st.session_state.target_email}** | Role: **{role}**"
+        )
+    with top_col2:
+        if st.button("Logout"):
+            st.query_params.clear()
+            st.session_state.authenticated = False
+            st.session_state.otp_sent = False
+            st.session_state.generated_otp = None
+            st.rerun()
 
-  # =========================================================
-  # MENU ITEM 1: DASHBOARD
-  # =========================================================
-  if menu_choice == "Dashboard":
-    st.title("📊 Business Dashboard")
+    # Sidebar Navigation Menu
+    st.sidebar.title("AAPL Portal")
+    st.sidebar.caption(f"Role View: {role}")
+    st.sidebar.divider()
 
-    # Top Controls: JC Month Selection
-    jc_options = ["M4", "M3", "M2", "M1"]
-    selected_jc = st.selectbox("Select Journey Cycle Month:", jc_options)
+    # Define Navigation Options based on Role
+    if is_admin_or_mgr:
+        menu_options = [
+            "Executive Dashboard",
+            "Outstanding Debtors",
+            "Stock Details",
+            "Investment Breakdown",
+        ]
+    else:
+        # Sales & Operations Menu Options
+        menu_options = [
+            "Achievement & Targets (Units)",
+            "Outstanding Debtors",
+            "Stock Details",
+        ]
 
-    # 2-Column Split Layout
-    left_col, right_col = st.columns([7, 3])
+    menu = st.sidebar.radio("Navigation Menu", options=menu_options)
 
-    # --- LEFT COLUMN: Active JC & Investment Tables ---
-    with left_col:
-      st.subheader(f"Sales Performance ({selected_jc})")
+    st.sidebar.divider()
+    if st.sidebar.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
 
-      # Mock targets based on JC selection
-      shoper_data = get_mock_sales_data()
-      divisions = ["SPM", "SPW", "THM", "KTH"]
+    # =========================================================
+    # MENU VIEW 1: ADMIN/MANAGER EXECUTIVE DASHBOARD
+    # =========================================================
+    if menu == "Executive Dashboard":
+        st.title("📌 Executive Overview Dashboard")
 
-      sales_rows = []
-      for div in divisions:
-        target = 500000
-        achieved = shoper_data[div]["achieved"]
-        pct = (achieved / target) * 100 if target > 0 else 0
-        balance = target - achieved
-        val = shoper_data[div]["value"]
+        available_jcs = (
+            df_jc["JC_Month"].unique().tolist()
+            if not df_jc.empty and "JC_Month" in df_jc.columns
+            else ["M1"]
+        )
+        selected_jc = st.selectbox("Select Active JC Month", options=available_jcs)
 
-        row = {
-            "Division": div,
-            "Target": f"₹ {target:,.0f}",
-            "Achieved": f"₹ {achieved:,.0f}",
-            "Achieved %": f"{pct:.1f}%",
-            "Balance": f"₹ {balance:,.0f}",
-        }
+        df_jc_filtered = df_jc[df_jc["JC_Month"] == selected_jc].copy()
 
-        # Value column visible ONLY to Admin & Manager
-        if st.session_state.user_role in ["Admin", "Manager"]:
-          row["Value"] = f"₹ {val:,.0f}"
+        tot_target_pcs = (
+            pd.to_numeric(df_jc_filtered["Target_Pcs"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        tot_achv_pcs = (
+            pd.to_numeric(df_jc_filtered["Achv_Pcs"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        tot_achv_val = (
+            pd.to_numeric(df_jc_filtered["Achv_Value"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        tot_invested = (
+            pd.to_numeric(df_inv["Total_Invested"], errors="coerce")
+            .fillna(0)
+            .sum()
+            if not df_inv.empty
+            else 0.0
+        )
 
-        sales_rows.append(row)
+        overall_pct = (
+            (tot_achv_pcs / tot_target_pcs) * 100 if tot_target_pcs > 0 else 0.0
+        )
 
-      st.dataframe(pd.DataFrame(sales_rows), use_container_width=True, hide_index=True)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+        c2.metric(
+            "Achieved (Pcs)", f"{tot_achv_pcs:,.0f}", delta=f"{overall_pct:.1f}%"
+        )
+        c3.metric("Sales Achieved (Value)", format_inr(tot_achv_val))
+        c4.metric("Total Capital Invested", format_inr(tot_invested))
 
-      # Additional Investment Table (Manager/Admin Only)
-      if st.session_state.user_role in ["Admin", "Manager"]:
         st.divider()
-        st.subheader("💼 Investment Breakdown")
 
-        tally_data = get_mock_tally_outstanding()
-        invest_rows = []
+        col_left, col_right = st.columns([6, 4])
+        with col_left:
+            st.subheader(f"JC Target vs Achievement ({selected_jc})")
+            fig_perf = px.bar(
+                df_jc_filtered,
+                x="Division",
+                y=["Target_Pcs", "Achv_Pcs"],
+                barmode="group",
+                labels={"value": "Pieces", "variable": "Metric"},
+                color_discrete_sequence=["#6c757d", "#0d6efd"],
+            )
+            st.plotly_chart(fig_perf, use_container_width=True)
 
-        for div in divisions:
-          stk_val = shoper_data[div]["stock_val"]
-          out_val = tally_data[div]
+        with col_right:
+            st.subheader("Capital Investment Share")
+            if not df_inv.empty:
+                fig_inv = px.pie(
+                    df_inv,
+                    names="Division",
+                    values="Total_Invested",
+                    hole=0.4,
+                    color_discrete_sequence=px.colors.qualitative.Pastel,
+                )
+                st.plotly_chart(fig_inv, use_container_width=True)
 
-          # Manual Input widget for Balance Cheques on Hand
-          chq_input = st.number_input(
-              f"Balance Cheques on Hand ({div}):",
-              min_value=0,
-              value=50000,
-              step=5000,
-              key=f"chq_{div}",
-          )
+    # =========================================================
+    # MENU VIEW 2: SALES & OPERATIONS UNITS DASHBOARD
+    # =========================================================
+    elif menu == "Achievement & Targets (Units)":
+        st.title("🎯 Sales Performance & Target Tracker")
+        st.caption("Unit-level achievement metrics per division.")
 
-          invest_rows.append({
-              "Division": div,
-              "Stock Value": f"₹ {stk_val:,.0f}",
-              "Outstanding": f"₹ {out_val:,.0f}",
-              "Balance Cheques on Hand": f"₹ {chq_input:,.0f}",
-          })
+        available_jcs = (
+            df_jc["JC_Month"].unique().tolist()
+            if not df_jc.empty and "JC_Month" in df_jc.columns
+            else ["M1"]
+        )
+        selected_jc = st.selectbox("Select Active JC Month", options=available_jcs)
 
-        st.dataframe(
-            pd.DataFrame(invest_rows), use_container_width=True, hide_index=True
+        df_jc_filtered = df_jc[df_jc["JC_Month"] == selected_jc].copy()
+
+        tot_target_pcs = (
+            pd.to_numeric(df_jc_filtered["Target_Pcs"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        tot_achv_pcs = (
+            pd.to_numeric(df_jc_filtered["Achv_Pcs"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        tot_bal_pcs = (
+            pd.to_numeric(df_jc_filtered["Balance_Pcs"], errors="coerce")
+            .fillna(0)
+            .sum()
+        )
+        overall_pct = (
+            (tot_achv_pcs / tot_target_pcs) * 100 if tot_target_pcs > 0 else 0.0
         )
 
-    # --- RIGHT COLUMN: Historical JCs Summary ---
-    with right_col:
-      st.subheader("🕒 Previous JCs Summary")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+        c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
+        c3.metric("Achievement %", f"{overall_pct:.1f}%")
+        c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
 
-      # Simulated historical totals for past JCs
-      past_jc_data = [
-          {
-              "Month": "M1",
-              "Target": "₹ 18,00,000",
-              "Achieved": "₹ 17,50,000",
-              "% Ach": "97.2%",
-          },
-          {
-              "Month": "M2",
-              "Target": "₹ 19,00,000",
-              "Achieved": "₹ 18,20,000",
-              "% Ach": "95.7%",
-          },
-          {
-              "Month": "M3",
-              "Target": "₹ 20,00,000",
-              "Achieved": "₹ 19,80,000",
-              "% Ach": "99.0%",
-          },
-      ]
+        st.divider()
 
-      # Filter out current and future months
-      current_idx = jc_options.index(selected_jc)
-      visible_past = past_jc_data[len(jc_options) - 1 - current_idx :]
-
-      if visible_past:
-        st.dataframe(
-            pd.DataFrame(visible_past), use_container_width=True, hide_index=True
+        st.subheader(f"Division Target vs Achievement in Units ({selected_jc})")
+        fig_units = px.bar(
+            df_jc_filtered,
+            x="Division",
+            y=["Target_Pcs", "Achv_Pcs", "Balance_Pcs"],
+            barmode="group",
+            labels={"value": "Quantity (Pcs)", "variable": "Status"},
+            color_discrete_sequence=["#0d6efd", "#198754", "#dc3545"],
         )
-      else:
-        st.info("No past JCs prior to M1.")
+        st.plotly_chart(fig_units, use_container_width=True)
 
-  # =========================================================
-  # MENU ITEM 2: OUTSTANDING
-  # =========================================================
-  elif menu_choice == "Outstanding":
-    st.title("💳 Outstanding Debtors")
-    st.info("Your existing Outstanding Debtors table renders here.")
+        st.subheader("Division Performance Breakdown")
+        st.dataframe(
+            df_jc_filtered[
+                ["Division", "Target_Pcs", "Achv_Pcs", "Achv_Pct", "Balance_Pcs"]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
 
-  # =========================================================
-  # MENU ITEM 3: STOCK
-  # =========================================================
-  elif menu_choice == "Stock":
-    st.title("📦 Stock Report")
-    st.info("Stock reports from Shoper 9 will be connected here.")
+    # =========================================================
+    # MENU VIEW 3: OUTSTANDING DEBTORS (ACCESSIBLE TO ALL)
+    # =========================================================
+    elif menu == "Outstanding Debtors":
+        st.title("💸 Outstanding Debtors Portal")
+
+        if not df_out.empty and "Party Name" in df_out.columns:
+            unique_parties = sorted(
+                [p for p in df_out["Party Name"].unique() if str(p).strip() != ""]
+            )
+            party_list = ["All Parties"] + unique_parties
+            selected_party = st.selectbox("Search and Select Party Name:", party_list)
+
+            if selected_party != "All Parties":
+                filtered_df = df_out[df_out["Party Name"] == selected_party].copy()
+            else:
+                filtered_df = df_out.copy()
+
+            if "Invoice Date" in filtered_df.columns:
+                filtered_df = filtered_df.sort_values(
+                    by="Invoice Date", ascending=True
+                )
+                filtered_df["Invoice Date"] = filtered_df["Invoice Date"].dt.strftime(
+                    "%d-%m-%Y"
+                )
+
+            total_pending = filtered_df["Pending Amount"].sum()
+            bill_count = len(filtered_df)
+
+            col1, col2 = st.columns(2)
+            col1.metric("Total Outstanding", format_inr(total_pending))
+            col2.metric("Total Pending Bills", bill_count)
+
+            st.divider()
+
+            # Format Pending Amount column for display
+            display_df = filtered_df.copy()
+            display_df["Pending Amount"] = display_df["Pending Amount"].apply(
+                format_inr
+            )
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("No data found in OUTSTANDING sheet.")
+
+    # =========================================================
+    # MENU VIEW 4: GRANULAR STOCK DETAILS (ACCESSIBLE TO ALL)
+    # =========================================================
+    elif menu == "Stock Details":
+        st.title("📦 Granular Inventory & Stock Details")
+
+        if not df_stock.empty:
+            # Multi-column Search/Filter
+            col_search, col_div = st.columns([2, 1])
+
+            with col_search:
+                search_query = st.text_input(
+                    "🔍 Search Stock by Item Name / Code:"
+                )
+
+            with col_div:
+                div_options = (
+                    ["All Divisions"] + sorted(df_stock["Division"].unique().tolist())
+                    if "Division" in df_stock.columns
+                    else ["All Divisions"]
+                )
+                selected_stock_div = st.selectbox(
+                    "Filter Division:", div_options
+                )
+
+            filtered_stock = df_stock.copy()
+
+            if selected_stock_div != "All Divisions":
+                filtered_stock = filtered_stock[
+                    filtered_stock["Division"] == selected_stock_div
+                ]
+
+            if search_query:
+                # Fuzzy string match across string columns
+                mask = filtered_stock.astype(str).apply(
+                    lambda row: row.str.contains(search_query, case=False).any(),
+                    axis=1,
+                )
+                filtered_stock = filtered_stock[mask]
+
+            # High-level Summary Metrics for Stock
+            st.caption(f"Displaying {len(filtered_stock)} stock items")
+            st.dataframe(filtered_stock, use_container_width=True, hide_index=True)
+        else:
+            st.warning(
+                "Granular stock sheet (`STOCK`) is empty or not created yet. Please add item rows to `STOCK` worksheet."
+            )
+
+    # =========================================================
+    # MENU VIEW 5: INVESTMENT BREAKDOWN (ADMIN/MANAGER ONLY)
+    # =========================================================
+    elif menu == "Investment Breakdown":
+        st.title("💼 Capital & Investment Master Breakdown")
+
+        if not df_inv.empty:
+            tot_out = (
+                pd.to_numeric(df_inv["Outstanding"], errors="coerce")
+                .fillna(0)
+                .sum()
+            )
+            tot_chq = (
+                pd.to_numeric(df_inv["Chqs_Hand"], errors="coerce").fillna(0).sum()
+            )
+            tot_stk = (
+                pd.to_numeric(df_inv["Stock_Value"], errors="coerce")
+                .fillna(0)
+                .sum()
+            )
+            tot_inv = (
+                pd.to_numeric(df_inv["Total_Invested"], errors="coerce")
+                .fillna(0)
+                .sum()
+            )
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Stock Valuation", format_inr(tot_stk))
+            c2.metric("Total Debtors Outstanding", format_inr(tot_out))
+            c3.metric("Cheques / PDCs in Hand", format_inr(tot_chq))
+            c4.metric("Total Capital Invested", format_inr(tot_inv))
+
+            st.divider()
+
+            display_inv = df_inv.copy()
+            for col in ["Stock_Value", "Outstanding", "Chqs_Hand", "Total_Invested"]:
+                if col in display_inv.columns:
+                    display_inv[col] = display_inv[col].apply(format_inr)
+
+            st.dataframe(display_inv, use_container_width=True, hide_index=True)
+        else:
+            st.warning("No data found in Investment_Master sheet.")
