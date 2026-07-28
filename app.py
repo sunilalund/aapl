@@ -649,8 +649,8 @@ else:
                 )
                 filtered_stock = filtered_stock[mask]
 
-            # 3. Exclude Columns 1, 2, 3, 11, 12, 13, 14 (-based indices 0, 1, 2, 10, 11, 12, 13) from Display
-            exclude_indices = [0, 1, 2, 10, 11, 12, 13]
+            # 3. Exclude Columns 1, 2, 3, 11, 13, 14 (-based indices 0, 1, 2, 10, 12, 13) from Display
+            exclude_indices = [0, 1, 2, 10, 12, 13]
             cols_to_drop = [
                 df_stock.columns[i]
                 for i in exclude_indices
