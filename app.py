@@ -377,7 +377,7 @@ else:
             .sum()
 	)
 
-	c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4, c5 = st.columns(5)
 
 	if is_admin_or_mgr:
 
