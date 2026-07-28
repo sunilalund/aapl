@@ -380,16 +380,16 @@ else:
         c1, c2, c3, c4, c5 = st.columns(5)
 
         if is_admin_or_mgr:
-           c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
-	       c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
-	       c3.metric("Achievement %", f"{overall_pct:.1f}%")
-	       c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
-	       c5.metric("Achieved (Value)", format_inr(tot_achv_val))
+			c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+	        c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
+	        c3.metric("Achievement %", f"{overall_pct:.1f}%")
+	        c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
+	        c5.metric("Achieved (Value)", format_inr(tot_achv_val))
 	    else:
-	       c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
-	       c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
-	       c3.metric("Achievement %", f"{overall_pct:.1f}%")
-	       c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
+	        c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+	        c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
+	        c3.metric("Achievement %", f"{overall_pct:.1f}%")
+	        c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
 
         st.divider()
 
