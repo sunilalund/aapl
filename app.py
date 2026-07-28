@@ -17,7 +17,7 @@ from google.oauth2.service_account import Credentials
 # -------------------------------------------------------------
 st.set_page_config(
     page_title="AAPL Sales & Operations Portal",
-    page_icon="ðŸ“Š",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -29,13 +29,13 @@ WORKSHEET_JC = "JC_Master"
 WORKSHEET_INVESTMENT = "Investment_Master"
 WORKSHEET_STOCK = "STOCK"  # Sheet containing full granular stock item records
 
-# Gmail SMTP Credentials (from Secrets or fallbacks)
+# Gmail SMTP Credentials
 SENDER_EMAIL = st.secrets.get("SENDER_EMAIL", "your-email@gmail.com")
 SENDER_APP_PASSWORD = st.secrets.get("SENDER_APP_PASSWORD", "xxxx xxxx xxxx xxxx")
 
 
 # -------------------------------------------------------------
-# 2. GOOGLE SHEETS & AUTH HELPERS
+# 2. HELPER FUNCTIONS & AUTHENTICATION
 # -------------------------------------------------------------
 def generate_auth_token(email, expiry_timestamp):
     """Generates a secure 16-character token from the user email."""
@@ -134,10 +134,21 @@ def format_inr(val):
             s = s[:-2]
         groups.reverse()
         formatted_int = ",".join(groups + [r]) if groups else r
-        res = f"â‚¹{formatted_int}.{d[0]}"
+        res = f"₹{formatted_int}.{d[0]}"
         return f"-{res}" if is_neg else res
     except Exception:
-        return f"â‚¹{val}"
+        return f"₹{val}"
+
+
+def sort_jc_months(months_list):
+    """Sorts JC Month strings chronologically from M1 to M13."""
+    def parse_m(m):
+        m_str = str(m).strip().upper()
+        if m_str.startswith("M") and m_str[1:].isdigit():
+            return int(m_str[1:])
+        return 999
+
+    return sorted([m for m in set(months_list) if str(m).strip() != ""], key=parse_m)
 
 
 # -------------------------------------------------------------
@@ -161,9 +172,9 @@ def load_all_portal_data():
             df_out["Pending Amount"] = (
                 df_out["Pending Amount"].astype(str).str.replace(",", "")
             )
-            df_out["Pending Amount"] = (
-                pd.to_numeric(df_out["Pending Amount"], errors="coerce").fillna(0)
-            )
+            df_out["Pending Amount"] = pd.to_numeric(
+                df_out["Pending Amount"], errors="coerce"
+            ).fillna(0)
     except Exception:
         df_out = pd.DataFrame()
 
@@ -234,7 +245,7 @@ if not st.session_state.authenticated:
 # 5. AUTHENTICATION UI GATE (LOGIN PAGE)
 # -------------------------------------------------------------
 if not st.session_state.authenticated:
-    st.title("ðŸ” AAPL Sales & Operations Portal")
+    st.title("🔐 AAPL Sales & Operations Portal")
     st.subheader("Login Authentication")
 
     if not st.session_state.otp_sent:
@@ -254,9 +265,7 @@ if not st.session_state.authenticated:
                             st.success(f"OTP sent successfully to {email_input}!")
                             st.rerun()
                     else:
-                        st.error(
-                            "Access Denied: Email not authorized or inactive."
-                        )
+                        st.error("Access Denied: Email not authorized or inactive.")
             else:
                 st.warning("Please enter a valid email address.")
     else:
@@ -268,10 +277,8 @@ if not st.session_state.authenticated:
             if st.button("Verify OTP"):
                 if entered_otp == st.session_state.generated_otp:
                     st.session_state.authenticated = True
-                    exp_ts = int(time.time()) + 43200  # 12 Hours persistent URL token
-                    token = generate_auth_token(
-                        st.session_state.target_email, exp_ts
-                    )
+                    exp_ts = int(time.time()) + 43200  # 12 Hours persistent token
+                    token = generate_auth_token(st.session_state.target_email, exp_ts)
 
                     st.query_params["user"] = st.session_state.target_email
                     st.query_params["token"] = token
@@ -314,7 +321,6 @@ else:
     st.sidebar.caption(f"Role View: {role}")
     st.sidebar.divider()
 
-    # Define Navigation Options based on Role
     if is_admin_or_mgr:
         menu_options = [
             "Executive Dashboard",
@@ -323,7 +329,6 @@ else:
             "Investment Breakdown",
         ]
     else:
-        # Sales & Operations Menu Options
         menu_options = [
             "Achievement & Targets (Units)",
             "Outstanding Debtors",
@@ -333,174 +338,214 @@ else:
     menu = st.sidebar.radio("Navigation Menu", options=menu_options)
 
     st.sidebar.divider()
-    if st.sidebar.button("ðŸ”„ Refresh Data"):
+    if st.sidebar.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
     # =========================================================
-    # MENU VIEW 2: SALES & OPERATIONS UNITS DASHBOARD
+    # MENU VIEW 1 & 2: UNIFIED DASHBOARD (TABLE TOP, GRAPH DOWN)
     # =========================================================
-    elif menu == "Achievement & Targets (Units)":
-        st.title("ðŸŽ¯ Sales Performance & Target Tracker")
-        st.caption("Unit-level achievement metrics per division.")
+    if menu in ["Executive Dashboard", "Achievement & Targets (Units)"]:
+        st.title("📊 Sales Performance & Dashboard")
 
-        available_jcs = (
-            df_jc["JC_Month"].unique().tolist()
+        # 1. Chronological JC Month Selection (M1 to M13)
+        all_jcs = (
+            sort_jc_months(df_jc["JC_Month"].tolist())
             if not df_jc.empty and "JC_Month" in df_jc.columns
             else ["M1"]
         )
-        selected_jc = st.selectbox("Select Active JC Month", options=available_jcs)
+        selected_jc = st.selectbox("Select JC Month:", options=all_jcs)
 
-        df_jc_filtered = df_jc[df_jc["JC_Month"] == selected_jc].copy()
+        current_m_num = (
+            int(selected_jc.replace("M", ""))
+            if selected_jc.startswith("M") and selected_jc[1:].isdigit()
+            else 1
+        )
 
-        tot_target_pcs = (
-            pd.to_numeric(df_jc_filtered["Target_Pcs"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        tot_achv_pcs = (
-            pd.to_numeric(df_jc_filtered["Achv_Pcs"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        tot_bal_pcs = (
-            pd.to_numeric(df_jc_filtered["Balance_Pcs"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        overall_pct = (
-            (tot_achv_pcs / tot_target_pcs) * 100 if tot_target_pcs > 0 else 0.0
-        )
-        tot_achv_val = (
-            pd.to_numeric(df_jc_filtered["Achv_Value"], errors="coerce")
-            .fillna(0)
-            .sum()
-	)
+        # Clean numeric data for current month
+        df_jc_curr = df_jc[df_jc["JC_Month"] == selected_jc].copy()
+        for col in ["Target_Pcs", "Achv_Pcs", "Balance_Pcs"]:
+            if col in df_jc_curr.columns:
+                df_jc_curr[col] = pd.to_numeric(df_jc_curr[col], errors="coerce").fillna(0)
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    if is_admin_or_mgr:
-        c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
-        c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
-        c3.metric("Achievement %", f"{overall_pct:.1f}%")
-        c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
-        c5.metric("Achieved (Value)", format_inr(tot_achv_val))
-    else:
-        c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
-        c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
-        c3.metric("Achievement %", f"{overall_pct:.1f}%")
-        c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
+        if is_admin_or_mgr and "Achv_Value" in df_jc_curr.columns:
+            df_jc_curr["Achv_Value"] = pd.to_numeric(
+                df_jc_curr["Achv_Value"], errors="coerce"
+            ).fillna(0)
+
+        # Summary Metrics Calculations
+        tot_target_pcs = df_jc_curr["Target_Pcs"].sum()
+        tot_achv_pcs = df_jc_curr["Achv_Pcs"].sum()
+        tot_bal_pcs = df_jc_curr["Balance_Pcs"].sum()
+        overall_pct = (tot_achv_pcs / tot_target_pcs * 100) if tot_target_pcs > 0 else 0.0
+
+        # Metric Summary Cards
+        if is_admin_or_mgr:
+            tot_achv_val = (
+                df_jc_curr["Achv_Value"].sum()
+                if "Achv_Value" in df_jc_curr.columns
+                else 0
+            )
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+            c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
+            c3.metric("Achievement %", f"{overall_pct:.1f}%")
+            c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
+            c5.metric("Sales Achieved (Value)", format_inr(tot_achv_val))
+        else:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+            c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
+            c3.metric("Achievement %", f"{overall_pct:.1f}%")
+            c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
 
         st.divider()
 
-        st.subheader(f"Division Target vs Achievement in Units ({selected_jc})")
-        fig_units = px.bar(
-            df_jc_filtered,
+        # -------------------------------------------------------------
+        # TABLES AT TOP: Current Month Table (Left) & Prior Months (Right)
+        # -------------------------------------------------------------
+        st.subheader(f"📋 Sales Performance Tables ({selected_jc})")
+
+        col_left_tbl, col_right_tbl = st.columns([6, 4])
+
+        with col_left_tbl:
+            st.markdown(f"**Current Month ({selected_jc}) Division Breakdown**")
+
+            display_cols = ["Division", "Target_Pcs", "Achv_Pcs", "Balance_Pcs"]
+            if is_admin_or_mgr and "Achv_Value" in df_jc_curr.columns:
+                display_cols.append("Achv_Value")
+
+            df_curr_table = df_jc_curr[
+                [c for c in display_cols if c in df_jc_curr.columns]
+            ].copy()
+
+            df_curr_table["Achv_%"] = df_curr_table.apply(
+                lambda r: f"{(r['Achv_Pcs']/r['Target_Pcs']*100):.1f}%"
+                if r["Target_Pcs"] > 0
+                else "0.0%",
+                axis=1,
+            )
+
+            if is_admin_or_mgr and "Achv_Value" in df_curr_table.columns:
+                df_curr_table["Achv_Value"] = df_curr_table["Achv_Value"].apply(
+                    format_inr
+                )
+
+            st.dataframe(df_curr_table, use_container_width=True, hide_index=True)
+
+        with col_right_tbl:
+            st.markdown("**Prior Months Performance Summary (M1 to Prior)**")
+
+            # Calculate prior month list (M1 to current_m_num - 1)
+            prior_jcs = [
+                m
+                for m in all_jcs
+                if (
+                    int(m.replace("M", ""))
+                    if m.startswith("M") and m[1:].isdigit()
+                    else 999
+                )
+                < current_m_num
+            ]
+
+            if prior_jcs:
+                hist_records = []
+                for m_code in prior_jcs:
+                    df_m = df_jc[df_jc["JC_Month"] == m_code]
+                    m_tgt_pcs = pd.to_numeric(
+                        df_m["Target_Pcs"], errors="coerce"
+                    ).sum()
+                    m_achv_pcs = pd.to_numeric(
+                        df_m["Achv_Pcs"], errors="coerce"
+                    ).sum()
+                    m_pct = (m_achv_pcs / m_tgt_pcs * 100) if m_tgt_pcs > 0 else 0.0
+
+                    row_dict = {
+                        "JC Month": m_code,
+                        "Target (Pcs)": f"{m_tgt_pcs:,.0f}",
+                        "Achv (Pcs)": f"{m_achv_pcs:,.0f}",
+                        "Achv %": f"{m_pct:.1f}%",
+                    }
+
+                    if is_admin_or_mgr and "Achv_Value" in df_m.columns:
+                        m_val = pd.to_numeric(
+                            df_m["Achv_Value"], errors="coerce"
+                        ).sum()
+                        row_dict["Achv (Value)"] = format_inr(m_val)
+
+                    hist_records.append(row_dict)
+
+                df_hist = pd.DataFrame(hist_records)
+                st.dataframe(df_hist, use_container_width=True, hide_index=True)
+            else:
+                st.info(
+                    "Currently viewing M1. Prior month history will appear here from M2 onwards."
+                )
+
+        st.divider()
+
+        # -------------------------------------------------------------
+        # GRAPH DISPLAYED DOWN (Below Table)
+        # -------------------------------------------------------------
+        st.subheader(f"📈 Performance Chart ({selected_jc})")
+
+        fig_perf = px.bar(
+            df_jc_curr,
             x="Division",
-            y=["Target_Pcs", "Achv_Pcs", "Balance_Pcs", "Achv_Value"],
+            y=["Target_Pcs", "Achv_Pcs", "Balance_Pcs"],
             barmode="group",
-            labels={"value": "Quantity (Pcs)", "variable": "Status"},
+            labels={"value": "Units (Pcs)", "variable": "Status"},
             color_discrete_sequence=["#0d6efd", "#198754", "#dc3545"],
         )
-        st.plotly_chart(fig_units, use_container_width=True)
+        st.plotly_chart(fig_perf, use_container_width=True)
 
-        st.subheader("Division Performance Breakdown")
-        st.dataframe(
-            df_jc_filtered[
-                ["Division", "Target_Pcs", "Achv_Pcs", "Achv_Pct", "Balance_Pcs", "Achv_Value"]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
+        # -------------------------------------------------------------
+        # INVESTMENT SECTION DOWN (ADMIN / MANAGER ONLY - AT BOTTOM)
+        # -------------------------------------------------------------
+        if is_admin_or_mgr:
+            st.divider()
+            st.subheader("💼 Capital & Investment Master Breakdown")
 
-    # =========================================================
-    # MENU VIEW 1: ADMIN/MANAGER EXECUTIVE DASHBOARD
-    # =========================================================
-    if menu == "Executive Dashboard":
-        st.title("ðŸ“Œ Executive Overview Dashboard")
-
-        available_jcs = (
-            df_jc["JC_Month"].unique().tolist()
-            if not df_jc.empty and "JC_Month" in df_jc.columns
-            else ["M1"]
-        )
-        selected_jc = st.selectbox("Select Active JC Month", options=available_jcs)
-
-        df_jc_filtered = df_jc[df_jc["JC_Month"] == selected_jc].copy()
-
-        tot_target_pcs = (
-            pd.to_numeric(df_jc_filtered["Target_Pcs"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        tot_achv_pcs = (
-            pd.to_numeric(df_jc_filtered["Achv_Pcs"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        tot_achv_val = (
-            pd.to_numeric(df_jc_filtered["Achv_Value"], errors="coerce")
-            .fillna(0)
-            .sum()
-        )
-        tot_invested = (
-            pd.to_numeric(df_inv["Total_Invested"], errors="coerce")
-            .fillna(0)
-            .sum()
-            if not df_inv.empty
-            else 0.0
-        )
-
-        overall_pct = (
-            (tot_achv_pcs / tot_target_pcs) * 100 if tot_target_pcs > 0 else 0.0
-        )
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
-        c2.metric(
-            "Achieved (Pcs)", f"{tot_achv_pcs:,.0f}", delta=f"{overall_pct:.1f}%"
-        )
-        c3.metric("Sales Achieved (Value)", format_inr(tot_achv_val))
-        c4.metric("Total Capital Invested", format_inr(tot_invested))
-
-        st.divider()
-
-        col_left, col_right = st.columns([6, 4])
-        with col_left:
-            st.subheader(f"JC Target vs Achievement ({selected_jc})")
-            fig_perf = px.bar(
-                df_jc_filtered,
-                x="Division",
-                y=["Target_Pcs", "Achv_Pcs"],
-                barmode="group",
-                labels={"value": "Pieces", "variable": "Metric"},
-                color_discrete_sequence=["#6c757d", "#0d6efd"],
-            )
-            st.plotly_chart(fig_perf, use_container_width=True)
-
-        with col_right:
-            st.subheader("Capital Investment Share")
             if not df_inv.empty:
-                fig_inv = px.pie(
-                    df_inv,
-                    names="Division",
-                    values="Total_Invested",
-                    hole=0.4,
-                    color_discrete_sequence=px.colors.qualitative.Pastel,
-                )
-                st.plotly_chart(fig_inv, use_container_width=True)
+                inv_cols = [
+                    "Division",
+                    "Stock_Value",
+                    "Outstanding",
+                    "Chqs_Hand",
+                    "Total_Invested",
+                ]
+                existing_cols = [c for c in inv_cols if c in df_inv.columns]
+                display_inv = df_inv[existing_cols].copy()
 
+                column_renames = {
+                    "Stock_Value": "Stock Value",
+                    "Outstanding": "O/S Value",
+                    "Chqs_Hand": "Chqs on Hand Value",
+                    "Total_Invested": "Total Invested",
+                }
+                display_inv = display_inv.rename(columns=column_renames)
 
-    # Place this at the very bottom of the Dashboard menu block
-    if is_admin_or_mgr:
-         st.divider()
-         st.subheader("💼 Investment Breakdown")
-         st.dataframe(df_inv, use_container_width=True, hide_index=True)
+                for col in [
+                    "Stock Value",
+                    "O/S Value",
+                    "Chqs on Hand Value",
+                    "Total Invested",
+                ]:
+                    if col in display_inv.columns:
+                        display_inv[col] = pd.to_numeric(
+                            display_inv[col], errors="coerce"
+                        ).fillna(0)
+                        display_inv[col] = display_inv[col].apply(format_inr)
+
+                st.dataframe(display_inv, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No data found in Investment_Master sheet.")
 
     # =========================================================
     # MENU VIEW 3: OUTSTANDING DEBTORS (ACCESSIBLE TO ALL)
     # =========================================================
     elif menu == "Outstanding Debtors":
-        st.title("ðŸ’¸ Outstanding Debtors Portal")
+        st.title("💸 Outstanding Debtors Portal")
 
         if not df_out.empty and "Party Name" in df_out.columns:
             unique_parties = sorted(
@@ -531,7 +576,6 @@ else:
 
             st.divider()
 
-            # Format Pending Amount column for display
             display_df = filtered_df.copy()
             display_df["Pending Amount"] = display_df["Pending Amount"].apply(
                 format_inr
@@ -544,16 +588,13 @@ else:
     # MENU VIEW 4: GRANULAR STOCK DETAILS (ACCESSIBLE TO ALL)
     # =========================================================
     elif menu == "Stock Details":
-        st.title("ðŸ“¦ Granular Inventory & Stock Details")
+        st.title("📦 Granular Inventory & Stock Details")
 
         if not df_stock.empty:
-            # Multi-column Search/Filter
             col_search, col_div = st.columns([2, 1])
 
             with col_search:
-                search_query = st.text_input(
-                    "ðŸ” Search Stock by Item Name / Code:"
-                )
+                search_query = st.text_input("🔍 Search Stock by Item Name / Code:")
 
             with col_div:
                 div_options = (
@@ -561,9 +602,7 @@ else:
                     if "Division" in df_stock.columns
                     else ["All Divisions"]
                 )
-                selected_stock_div = st.selectbox(
-                    "Filter Division:", div_options
-                )
+                selected_stock_div = st.selectbox("Filter Division:", div_options)
 
             filtered_stock = df_stock.copy()
 
@@ -573,14 +612,12 @@ else:
                 ]
 
             if search_query:
-                # Fuzzy string match across string columns
                 mask = filtered_stock.astype(str).apply(
                     lambda row: row.str.contains(search_query, case=False).any(),
                     axis=1,
                 )
                 filtered_stock = filtered_stock[mask]
 
-            # High-level Summary Metrics for Stock
             st.caption(f"Displaying {len(filtered_stock)} stock items")
             st.dataframe(filtered_stock, use_container_width=True, hide_index=True)
         else:
@@ -592,7 +629,7 @@ else:
     # MENU VIEW 5: INVESTMENT BREAKDOWN (ADMIN/MANAGER ONLY)
     # =========================================================
     elif menu == "Investment Breakdown":
-        st.title("ðŸ’¼ Capital & Investment Master Breakdown")
+        st.title("💼 Capital & Investment Master Breakdown")
 
         if not df_inv.empty:
             tot_out = (
