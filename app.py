@@ -598,12 +598,12 @@ else:
                     .reindex(bucket_order, fill_value=0)
                     .reset_index()
                 )
-
+                age_summary["Full_Text"] = age_summary["Pending Amount"].apply(lambda x: f"{x:,.0f}" if x > 0 else "0")
                 fig_age = px.bar(
                     age_summary,
                     x="_Age_Bucket",
                     y="Pending Amount",
-                    text_auto=".2s",
+                    text_auto="Full_Text",
                     labels={"_Age_Bucket": "Age Bucket", "Pending Amount": "Amount"},
                     color="_Age_Bucket",
                     color_discrete_map={
@@ -613,6 +613,7 @@ else:
                         "90+ Days": "#dc3545",    # Alert Red
                     },
                 )
+                fig_age.update_traces(textposition="auto")
                 fig_age.update_layout(
                     height=180,
                     margin=dict(l=10, r=10, t=10, b=10),
