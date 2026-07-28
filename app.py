@@ -17,7 +17,7 @@ from google.oauth2.service_account import Credentials
 # -------------------------------------------------------------
 st.set_page_config(
     page_title="AAPL Sales & Operations Portal",
-    page_icon="Ã°Å¸â€œÅ ",
+    page_icon="\U0001F4CA",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -120,7 +120,7 @@ def send_otp_email(recipient_email, otp_code):
 
 
 def format_inr(val):
-    """Formats numeric values into Indian Rupee format."""
+    """Formats numeric values into Indian Rupee format using universal unicode escape."""
     try:
         val = float(val)
         is_neg = val < 0
@@ -134,10 +134,10 @@ def format_inr(val):
             s = s[:-2]
         groups.reverse()
         formatted_int = ",".join(groups + [r]) if groups else r
-        res = f"Ã¢â€šÂ¹{formatted_int}.{d[0]}"
+        res = f"\u20b9{formatted_int}.{d[0]}"
         return f"-{res}" if is_neg else res
     except Exception:
-        return f"Ã¢â€šÂ¹{val}"
+        return f"\u20b9{val}"
 
 
 def sort_jc_months(months_list):
@@ -184,10 +184,7 @@ def load_all_portal_data():
         df_jc = pd.DataFrame(ws_jc)
         
         if not df_jc.empty:
-            # Strip extra spaces from column headers
             df_jc.columns = df_jc.columns.astype(str).str.strip()
-            
-            # Standardize alternative column header names to 'Achv_Value'
             col_map = {
                 "Achv Value": "Achv_Value",
                 "Achv_value": "Achv_Value",
@@ -259,7 +256,7 @@ if not st.session_state.authenticated:
 # 5. AUTHENTICATION UI GATE (LOGIN PAGE)
 # -------------------------------------------------------------
 if not st.session_state.authenticated:
-    st.title("Ã°Å¸â€Â AAPL Sales & Operations Portal")
+    st.title("\U0001F511 AAPL Sales & Operations Portal")
     st.subheader("Login Authentication")
 
     if not st.session_state.otp_sent:
@@ -352,17 +349,16 @@ else:
     menu = st.sidebar.radio("Navigation Menu", options=menu_options)
 
     st.sidebar.divider()
-    if st.sidebar.button("Ã°Å¸â€â€ž Refresh Data"):
+    if st.sidebar.button("\U0001F504 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
     # =========================================================
-    # MENU VIEW 1 & 2: UNIFIED DASHBOARD (TABLE TOP, GRAPH DOWN)
+    # MENU VIEW 1 & 2: UNIFIED DASHBOARD
     # =========================================================
     if menu in ["Executive Dashboard", "Achievement & Targets (Units)"]:
-        st.title("Ã°Å¸â€œÅ  Sales Performance & Dashboard")
+        st.title("\U0001F4CA Sales Performance & Dashboard")
 
-        # 1. Chronological JC Month Selection (M1 to M13)
         all_jcs = (
             sort_jc_months(df_jc["JC_Month"].tolist())
             if not df_jc.empty and "JC_Month" in df_jc.columns
@@ -376,7 +372,6 @@ else:
             else 1
         )
 
-        # Clean numeric data for current month
         df_jc_curr = df_jc[df_jc["JC_Month"] == selected_jc].copy()
         for col in ["Target_Pcs", "Achv_Pcs", "Balance_Pcs"]:
             if col in df_jc_curr.columns:
@@ -387,13 +382,11 @@ else:
                 df_jc_curr["Achv_Value"], errors="coerce"
             ).fillna(0)
 
-        # Summary Metrics Calculations
         tot_target_pcs = df_jc_curr["Target_Pcs"].sum()
         tot_achv_pcs = df_jc_curr["Achv_Pcs"].sum()
         tot_bal_pcs = df_jc_curr["Balance_Pcs"].sum()
         overall_pct = (tot_achv_pcs / tot_target_pcs * 100) if tot_target_pcs > 0 else 0.0
 
-        # Metric Summary Cards
         if is_admin_or_mgr:
             tot_achv_val = (
                 df_jc_curr["Achv_Value"].sum()
@@ -415,10 +408,8 @@ else:
 
         st.divider()
 
-        # -------------------------------------------------------------
-        # TABLES AT TOP: Current Month Table (Left) & Prior Months (Right)
-        # -------------------------------------------------------------
-        st.subheader(f"Ã°Å¸â€œâ€¹ Sales Performance Tables ({selected_jc})")
+        # TABLES AT TOP
+        st.subheader(f"\U0001F4CB Sales Performance Tables ({selected_jc})")
 
         col_left_tbl, col_right_tbl = st.columns([6, 4])
 
@@ -450,7 +441,6 @@ else:
         with col_right_tbl:
             st.markdown("**Prior Months Performance Summary (M1 to Prior)**")
 
-            # Calculate prior month list (M1 to current_m_num - 1)
             prior_jcs = [
                 m
                 for m in all_jcs
@@ -498,10 +488,8 @@ else:
 
         st.divider()
 
-        # -------------------------------------------------------------
-        # GRAPH DISPLAYED DOWN (Below Table)
-        # -------------------------------------------------------------
-        st.subheader(f"Ã°Å¸â€œË† Performance Chart ({selected_jc})")
+        # GRAPH DOWN
+        st.subheader(f"\U0001F4C8 Performance Chart ({selected_jc})")
 
         fig_perf = px.bar(
             df_jc_curr,
@@ -513,12 +501,9 @@ else:
         )
         st.plotly_chart(fig_perf, use_container_width=True)
 
-        # -------------------------------------------------------------
-        # INVESTMENT SECTION DOWN (ADMIN / MANAGER ONLY - AT BOTTOM)
-        # -------------------------------------------------------------
         if is_admin_or_mgr:
             st.divider()
-            st.subheader("Ã°Å¸â€™Â¼ Capital & Investment Master Breakdown")
+            st.subheader("\U0001F4BC Capital & Investment Master Breakdown")
 
             if not df_inv.empty:
                 inv_cols = [
@@ -556,10 +541,10 @@ else:
                 st.warning("No data found in Investment_Master sheet.")
 
     # =========================================================
-    # MENU VIEW 3: OUTSTANDING DEBTORS (ACCESSIBLE TO ALL)
+    # MENU VIEW 3: OUTSTANDING DEBTORS
     # =========================================================
     elif menu == "Outstanding Debtors":
-        st.title("Ã°Å¸â€™Â¸ Outstanding Debtors Portal")
+        st.title("\U0001F4B8 Outstanding Debtors Portal")
 
         if not df_out.empty and "Party Name" in df_out.columns:
             unique_parties = sorted(
@@ -599,29 +584,27 @@ else:
             st.warning("No data found in OUTSTANDING sheet.")
 
     # =========================================================
-    # MENU VIEW 4: GRANULAR STOCK DETAILS (ACCESSIBLE TO ALL)
+    # MENU VIEW 4: GRANULAR STOCK DETAILS
     # =========================================================
     elif menu == "Stock Details":
-        st.title("ðŸ“¦ Granular Inventory & Stock Details")
+        st.title("\U0001F4E6 Granular Inventory & Stock Details")
 
         if not df_stock.empty and len(df_stock.columns) >= 2:
             df_stk = df_stock.copy()
 
-            # Ensure sheet column headers are strings and clean whitespace
             df_stk.columns = [str(col).strip() for col in df_stk.columns]
 
-            # 1. Extract Division Identifier from Column 2 (Index 1) -> last 3 characters
+            # Extract Division Tag from Column 2 (Index 1)
             col_2_name = df_stk.columns[1]
             df_stk["_Division_Tag"] = (
                 df_stk[col_2_name].astype(str).str.strip().str[-3:]
             )
 
-            # 2. Rename Column 10 (Index 9) to 'MRP'
+            # Rename Column 10 (Index 9) to 'MRP'
             if len(df_stk.columns) >= 10:
                 col_10_name = df_stk.columns[9]
                 df_stk = df_stk.rename(columns={col_10_name: "MRP"})
 
-            # Filter UI Layout
             col_search, col_div = st.columns([2, 1])
 
             with col_div:
@@ -632,16 +615,14 @@ else:
                 selected_stock_div = st.selectbox("Filter Division:", div_options)
 
             with col_search:
-                search_query = st.text_input("ðŸ” Search Stock by Item Name / Code:")
+                search_query = st.text_input("\U0001F50D Search Stock by Item Name / Code:")
 
-            # Apply Division Filter
             filtered_stock = df_stk.copy()
             if selected_stock_div != "All Divisions":
                 filtered_stock = filtered_stock[
                     filtered_stock["_Division_Tag"] == selected_stock_div
                 ]
 
-            # Apply Text Search Filter
             if search_query:
                 mask = filtered_stock.astype(str).apply(
                     lambda row: row.str.contains(search_query, case=False).any(),
@@ -649,7 +630,7 @@ else:
                 )
                 filtered_stock = filtered_stock[mask]
 
-            # 3. Exclude Columns 1, 2, 3, 11, 13, 14 (-based indices 0, 1, 2, 10, 12, 13) from Display
+            # Exclude Columns 1, 2, 3, 11, 13, 14 (indices 0, 1, 2, 10, 12, 13)
             exclude_indices = [0, 1, 2, 10, 12, 13]
             cols_to_drop = [
                 df_stock.columns[i]
@@ -661,17 +642,25 @@ else:
                 columns=cols_to_drop + ["_Division_Tag"], errors="ignore"
             )
 
+            # Drop any 'Unnamed' or blank headers automatically
+            unnamed_cols = [
+                c for c in display_stock.columns 
+                if c.lower().startswith("unnamed") or c.strip() == ""
+            ]
+            display_stock = display_stock.drop(columns=unnamed_cols, errors="ignore")
+
             st.caption(f"Displaying {len(display_stock)} stock items")
             st.dataframe(display_stock, use_container_width=True, hide_index=True)
         else:
             st.warning(
                 "Granular stock sheet (`STOCK`) is empty or does not contain enough columns."
             )
+
     # =========================================================
-    # MENU VIEW 5: INVESTMENT BREAKDOWN (ADMIN/MANAGER ONLY)
+    # MENU VIEW 5: INVESTMENT BREAKDOWN
     # =========================================================
     elif menu == "Investment Breakdown":
-        st.title("Ã°Å¸â€™Â¼ Capital & Investment Master Breakdown")
+        st.title("\U0001F4BC Capital & Investment Master Breakdown")
 
         if not df_inv.empty:
             tot_out = (
