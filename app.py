@@ -662,6 +662,8 @@ else:
             )
 
             st.caption(f"Displaying {len(display_stock)} stock items")
+            unnamed_cols = [c for c in display_stock.columns if c.lower().startswith("unnamed") or c.strip() == ""]
+            display_stock = display_stock.drop(columns=unnamed_cols, errors="ignore")
             st.dataframe(display_stock, use_container_width=True, hide_index=True)
         else:
             st.warning(
