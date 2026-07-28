@@ -558,31 +558,86 @@ else:
             else:
                 filtered_df = df_out.copy()
 
+            # Calculate Age-wise Buckets based on Invoice Date
             if "Invoice Date" in filtered_df.columns:
                 filtered_df = filtered_df.sort_values(
                     by="Invoice Date", ascending=True
                 )
-                filtered_df["Invoice Date"] = filtered_df["Invoice Date"].dt.strftime(
-                    "%d-%m-%Y"
-                )
+                today = pd.Timestamp.now()
+                days_diff = (today - filtered_df["Invoice Date"]).dt.days.fillna(0)
+
+                def assign_bucket(d):
+                    if d > 90:
+                        return "90+ Days"
+                    elif d > 60:
+                        return "61-90 Days"
+                    elif d > 30:
+                        return "31-60 Days"
+                    else:
+                        return "0-30 Days"
+
+                filtered_df["_Age_Bucket"] = days_diff.apply(assign_bucket)
+            else:
+                filtered_df["_Age_Bucket"] = "0-30 Days"
 
             total_pending = filtered_df["Pending Amount"].sum()
             bill_count = len(filtered_df)
 
-            col1, col2 = st.columns(2)
-            col1.metric("Total Outstanding", format_inr(total_pending))
-            col2.metric("Total Pending Bills", bill_count)
+            # Top Section: Metrics (Left) & Agewise Chart (Right)
+            top_m_col, top_c_col = st.columns([1, 2])
+
+            with top_m_col:
+                st.metric("Total Outstanding", format_inr(total_pending))
+                st.metric("Total Pending Bills", bill_count)
+
+            with top_c_col:
+                bucket_order = ["0-30 Days", "31-60 Days", "61-90 Days", "90+ Days"]
+                age_summary = (
+                    filtered_df.groupby("_Age_Bucket")["Pending Amount"]
+                    .sum()
+                    .reindex(bucket_order, fill_value=0)
+                    .reset_index()
+                )
+
+                fig_age = px.bar(
+                    age_summary,
+                    x="_Age_Bucket",
+                    y="Pending Amount",
+                    text_auto=".2s",
+                    labels={"_Age_Bucket": "Age Bucket", "Pending Amount": "Amount"},
+                    color="_Age_Bucket",
+                    color_discrete_map={
+                        "0-30 Days": "#198754",   # Green
+                        "31-60 Days": "#0dcaf0",  # Cyan
+                        "61-90 Days": "#ffc107",  # Warning Yellow
+                        "90+ Days": "#dc3545",    # Alert Red
+                    },
+                )
+                fig_age.update_layout(
+                    height=180,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    showlegend=False,
+                    xaxis_title=None,
+                    yaxis_title=None,
+                )
+                st.plotly_chart(fig_age, use_container_width=True)
 
             st.divider()
 
+            # Format table for display
             display_df = filtered_df.copy()
+            if "Invoice Date" in display_df.columns:
+                display_df["Invoice Date"] = display_df["Invoice Date"].dt.strftime(
+                    "%d-%m-%Y"
+                )
             display_df["Pending Amount"] = display_df["Pending Amount"].apply(
                 format_inr
             )
+            display_df = display_df.drop(columns=["_Age_Bucket"], errors="ignore")
+
             st.dataframe(display_df, use_container_width=True, hide_index=True)
         else:
             st.warning("No data found in OUTSTANDING sheet.")
-
     # =========================================================
     # MENU VIEW 4: GRANULAR STOCK DETAILS
     # =========================================================
