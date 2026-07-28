@@ -17,7 +17,7 @@ from google.oauth2.service_account import Credentials
 # -------------------------------------------------------------
 st.set_page_config(
     page_title="AAPL Sales & Operations Portal",
-    page_icon="ðŸ“Š",
+    page_icon="Ã°Å¸â€œÅ ",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -134,10 +134,10 @@ def format_inr(val):
             s = s[:-2]
         groups.reverse()
         formatted_int = ",".join(groups + [r]) if groups else r
-        res = f"â‚¹{formatted_int}.{d[0]}"
+        res = f"Ã¢â€šÂ¹{formatted_int}.{d[0]}"
         return f"-{res}" if is_neg else res
     except Exception:
-        return f"â‚¹{val}"
+        return f"Ã¢â€šÂ¹{val}"
 
 
 def sort_jc_months(months_list):
@@ -259,7 +259,7 @@ if not st.session_state.authenticated:
 # 5. AUTHENTICATION UI GATE (LOGIN PAGE)
 # -------------------------------------------------------------
 if not st.session_state.authenticated:
-    st.title("ðŸ” AAPL Sales & Operations Portal")
+    st.title("Ã°Å¸â€Â AAPL Sales & Operations Portal")
     st.subheader("Login Authentication")
 
     if not st.session_state.otp_sent:
@@ -352,7 +352,7 @@ else:
     menu = st.sidebar.radio("Navigation Menu", options=menu_options)
 
     st.sidebar.divider()
-    if st.sidebar.button("ðŸ”„ Refresh Data"):
+    if st.sidebar.button("Ã°Å¸â€â€ž Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
@@ -360,7 +360,7 @@ else:
     # MENU VIEW 1 & 2: UNIFIED DASHBOARD (TABLE TOP, GRAPH DOWN)
     # =========================================================
     if menu in ["Executive Dashboard", "Achievement & Targets (Units)"]:
-        st.title("ðŸ“Š Sales Performance & Dashboard")
+        st.title("Ã°Å¸â€œÅ  Sales Performance & Dashboard")
 
         # 1. Chronological JC Month Selection (M1 to M13)
         all_jcs = (
@@ -418,7 +418,7 @@ else:
         # -------------------------------------------------------------
         # TABLES AT TOP: Current Month Table (Left) & Prior Months (Right)
         # -------------------------------------------------------------
-        st.subheader(f"ðŸ“‹ Sales Performance Tables ({selected_jc})")
+        st.subheader(f"Ã°Å¸â€œâ€¹ Sales Performance Tables ({selected_jc})")
 
         col_left_tbl, col_right_tbl = st.columns([6, 4])
 
@@ -501,7 +501,7 @@ else:
         # -------------------------------------------------------------
         # GRAPH DISPLAYED DOWN (Below Table)
         # -------------------------------------------------------------
-        st.subheader(f"ðŸ“ˆ Performance Chart ({selected_jc})")
+        st.subheader(f"Ã°Å¸â€œË† Performance Chart ({selected_jc})")
 
         fig_perf = px.bar(
             df_jc_curr,
@@ -518,7 +518,7 @@ else:
         # -------------------------------------------------------------
         if is_admin_or_mgr:
             st.divider()
-            st.subheader("ðŸ’¼ Capital & Investment Master Breakdown")
+            st.subheader("Ã°Å¸â€™Â¼ Capital & Investment Master Breakdown")
 
             if not df_inv.empty:
                 inv_cols = [
@@ -559,7 +559,7 @@ else:
     # MENU VIEW 3: OUTSTANDING DEBTORS (ACCESSIBLE TO ALL)
     # =========================================================
     elif menu == "Outstanding Debtors":
-        st.title("ðŸ’¸ Outstanding Debtors Portal")
+        st.title("Ã°Å¸â€™Â¸ Outstanding Debtors Portal")
 
         if not df_out.empty and "Party Name" in df_out.columns:
             unique_parties = sorted(
@@ -602,7 +602,7 @@ else:
     # MENU VIEW 4: GRANULAR STOCK DETAILS (ACCESSIBLE TO ALL)
     # =========================================================
     elif menu == "Stock Details":
-        st.title("📦 Granular Inventory & Stock Details")
+        st.title("ðŸ“¦ Granular Inventory & Stock Details")
 
         if not df_stock.empty and len(df_stock.columns) >= 2:
             df_stk = df_stock.copy()
@@ -632,7 +632,7 @@ else:
                 selected_stock_div = st.selectbox("Filter Division:", div_options)
 
             with col_search:
-                search_query = st.text_input("🔍 Search Stock by Item Name / Code:")
+                search_query = st.text_input("ðŸ” Search Stock by Item Name / Code:")
 
             # Apply Division Filter
             filtered_stock = df_stk.copy()
@@ -671,7 +671,7 @@ else:
     # MENU VIEW 5: INVESTMENT BREAKDOWN (ADMIN/MANAGER ONLY)
     # =========================================================
     elif menu == "Investment Breakdown":
-        st.title("ðŸ’¼ Capital & Investment Master Breakdown")
+        st.title("Ã°Å¸â€™Â¼ Capital & Investment Master Breakdown")
 
         if not df_inv.empty:
             tot_out = (
