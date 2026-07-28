@@ -183,7 +183,7 @@ def load_all_portal_data():
         ws_jc = sh.worksheet(WORKSHEET_JC).get_all_records()
         df_jc = pd.DataFrame(ws_jc)
         
-	if not df_jc.empty:
+        if not df_jc.empty:
             # Strip extra spaces from column headers
             df_jc.columns = df_jc.columns.astype(str).str.strip()
             
