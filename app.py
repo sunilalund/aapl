@@ -380,8 +380,7 @@ else:
         c1, c2, c3, c4, c5 = st.columns(5)
 
         if is_admin_or_mgr:
-
-            c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
+        c1.metric("Target (Pcs)", f"{tot_target_pcs:,.0f}")
 	    c2.metric("Achieved (Pcs)", f"{tot_achv_pcs:,.0f}")
 	    c3.metric("Achievement %", f"{overall_pct:.1f}%")
 	    c4.metric("Balance Target (Pcs)", f"{tot_bal_pcs:,.0f}")
