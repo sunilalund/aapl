@@ -182,6 +182,20 @@ def load_all_portal_data():
     try:
         ws_jc = sh.worksheet(WORKSHEET_JC).get_all_records()
         df_jc = pd.DataFrame(ws_jc)
+        
+	if not df_jc.empty:
+            # Strip extra spaces from column headers
+            df_jc.columns = df_jc.columns.astype(str).str.strip()
+            
+            # Standardize alternative column header names to 'Achv_Value'
+            col_map = {
+                "Achv Value": "Achv_Value",
+                "Achv_value": "Achv_Value",
+                "Achieved Value": "Achv_Value",
+                "Achieved_Value": "Achv_Value",
+                "Sales Value": "Achv_Value",
+            }
+            df_jc.rename(columns=col_map, inplace=True)
     except Exception:
         df_jc = pd.DataFrame()
 
@@ -299,7 +313,7 @@ if not st.session_state.authenticated:
 # -------------------------------------------------------------
 else:
     df_out, df_jc, df_inv, df_stock = load_all_portal_data()
-    role = st.session_state.user_role
+    role = str(st.session_state.get("user_role", "Sales")).strip().title()
     is_admin_or_mgr = role in ["Admin", "Manager"]
 
     # Top Navigation Bar & User Information
